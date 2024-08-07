@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Google Sign-In</title>
+    <!-- Add Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/9.14.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.14.0/firebase-auth.js"></script>
+</head>
+<body>
+    <button id="google-sign-in">Sign in with Google</button>
+
+    <!-- Inline script to handle Firebase authentication -->
+    <script type="module">
+        // Import the functions you need from the SDKs you need
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/9.14.0/firebase-app.js";
+        import { getAuth, GoogleAuthProvider, signInWithPopup } from "https://www.gstatic.com/firebasejs/9.14.0/firebase-auth.js";
+
+        // Your web app's Firebase configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyCS-ejGDo8O_GMWDgW1xaYT5fjqBXlKjW4",
+            authDomain: "apilogin-6efd6.firebaseapp.com",
+            projectId: "apilogin-6efd6",
+            storageBucket: "apilogin-6efd6.appspot.com",
+            messagingSenderId: "741201850844",
+            appId: "1:741201850844:web:e3de36b7f7ad5626b29f19",
+            measurementId: "G-YX2L16N0JM"
+        };
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const provider = new GoogleAuthProvider();
+
+        // Function to handle Google sign-in
+        async function signInWithGoogle() {
+            try {
+                const result = await signInWithPopup(auth, provider);
+                // This gives you a Google Access Token. You can use it to access Google APIs.
+                const token = await result.user.getIdToken();
+                // The signed-in user info.
+                const user = result.user;
+                console.log('User info:', user);
+                console.log('Token:', token);
+                // You can send the token to your server to authenticate the user
+                // Example:
+                const response = await fetch('http://localhost:3000/google-signin', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ token: token })
+                });
+                const data = await response.json();
+                console.log('Server response:', data);
+            } catch (error) {
+                // Handle Errors here.
+                console.error('Error:', error.message);
+            }
+        }
+
+        // Attach the function to the button click event
+        document.getElementById('google-sign-in').addEventListener('click', signInWithGoogle);
+    </script>
+</body>
+</html>

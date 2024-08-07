@@ -3,13 +3,24 @@ const bodyParser = require('body-parser');
 const mysql = require('mysql2');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-require('dotenv').config(); // Load environment variables from .env file
+const admin = require('firebase-admin');
+const cors = require('cors');
+require('dotenv').config();
 
 const app = express();
 
 // Middleware
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
+app.use(cors()); // Enable CORS
+
+// Initialize Firebase Admin SDK
+const serviceAccount = require('./config/apilogin-6efd6-firebase-adminsdk-b3l6z-c2e5fe541a.json');
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+  // Optionally you can add databaseURL here
+});
 
 // Database connection
 const connection = mysql.createConnection({
@@ -37,7 +48,7 @@ app.post('/register', (req, res) => {
       return res.json({ error: 'Database error during username check' });
     }
     if (results.length > 0) {
-      return res.json({ error: 'Username already in use' }); 
+      return res.json({ error: 'Username already in use' });
     }
 
     bcrypt.hash(password, 10, (err, hash) => {
@@ -63,7 +74,6 @@ app.post('/login', (req, res) => {
   if (failedLoginAttempts[username] && failedLoginAttempts[username].count >= 5) {
     const now = Date.now();
     const timeSinceLastAttempt = now - failedLoginAttempts[username].lastAttempt;
-    console.log('time',timeSinceLastAttempt)  
     if (timeSinceLastAttempt < 300000) { // 5 minutes in milliseconds
       return res.status(429).send({ message: 'Too many failed login attempts. Try again in 5 minutes.' });
     } else {
@@ -117,6 +127,73 @@ app.post('/login', (req, res) => {
       });
     });
   });
+});
+
+// Verify Firebase ID Token
+async function verifyFirebaseToken(token) {
+  try {
+    const decodedToken = await admin.auth().verifyIdToken(token);
+    return decodedToken;
+  } catch (error) {
+    throw new Error('Invalid Firebase token');
+  }
+}
+
+// Google Sign-In route
+app.post('/google-signin', async (req, res) => {
+  const { token } = req.body;
+
+  try {
+    const decodedToken = await verifyFirebaseToken(token);
+    console.log('Decoded Token:', decodedToken); // Log decoded token
+    const { email, uid: googleId, name, picture } = decodedToken;
+
+    // Check if the user already exists
+    const checkSql = 'SELECT * FROM users WHERE google_id = ?';
+    connection.query(checkSql, [googleId], (err, results) => {
+      if (err) {
+        return res.status(500).json({ error: 'Database error during Google ID check' });
+      }
+
+      if (results.length > 0) {
+        // User exists, log them in
+        const user = results[0];
+        const jwtToken = jwt.sign({ id: user.id }, process.env.JWT_SECRET, { expiresIn: '1h' });
+
+        return res.json({
+          message: 'Authentication successful',
+          token: jwtToken,
+          user
+        });
+      } else {
+        // User doesn't exist, register them
+        const registerSql = 'INSERT INTO users (google_id, name, email, picture) VALUES (?, ?, ?, ?)';
+        connection.query(registerSql, [googleId, name, email, picture], (err, result) => {
+          if (err) {
+            return res.status(500).json({ error: 'Database error during Google registration' });
+          }
+
+          const userId = result.insertId;
+          const jwtToken = jwt.sign({ id: userId }, process.env.JWT_SECRET, { expiresIn: '1h' });
+
+          return res.status(201).json({
+            message: 'User registered and authenticated successfully',
+            token: jwtToken,
+            user: {
+              id: userId,
+              username: email,
+              google_id: googleId,
+              name,
+              email,
+              picture
+            }
+          });
+        });
+      }
+    });
+  } catch (error) {
+    res.status(401).json({ error: 'Invalid Firebase token' });
+  }
 });
 
 // Start the server
