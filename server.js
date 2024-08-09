@@ -7,6 +7,8 @@ const admin = require('firebase-admin');
 const cors = require('cors');
 const axios = require('axios');
 const fs = require('fs');
+const crypto = require('crypto');
+const nodemailer = require('nodemailer');
 require('dotenv').config();
 
 const app = express();
@@ -19,6 +21,7 @@ app.use(cors()); // Enable CORS
 
 // Initialize Firebase Admin SDK
 const serviceAccount = require('./config/apilogin-6efd6-firebase-adminsdk-b3l6z-c2e5fe541a.json');
+const e = require('express');
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
@@ -48,52 +51,345 @@ connection.connect(err => {
 // In-memory store for failed login attempts
 const failedLoginAttempts = {};
 
-// Register route
-app.post('/register', (req, res) => {
-  const { username, password } = req.body;
+// Generate OTP
+function generateOtp() {
+  const otp = crypto.randomBytes(3).toString('hex'); // 3 bytes = 6 hex characters
+  return parseInt(otp, 16).toString().slice(0, 6); // Convert to an integer and then take the first 6 digits
+}
+
+// Send OTP to the user's email
+function sendOtpEmail(email, otp, callback) {
+  const transporter = nodemailer.createTransport({
+      service: 'Gmail',
+      auth: {
+          user: process.env.email,
+          pass: process.env.emailpassword
+      }
+  });
+
+  const mailOptions = {
+      from: process.env.email,
+      to: email,
+      subject: 'Your OTP Code',
+      text: `Your OTP code is ${otp}`
+  };
+
+  transporter.sendMail(mailOptions, (error, info) => {
+      if (error) {
+          return callback(error);
+      }
+      callback(null, info);
+  });
+}
+
+function sendResetOTPEmail(email, OTP, callback) {
+  // Create a transporter object using SMTP transport
+  const transporter = nodemailer.createTransport({
+      service: 'Gmail', 
+      auth: {
+        user: process.env.email,
+        pass: process.env.emailpassword
+      }
+  });
+
+  // Email options
+  const mailOptions = {
+      from: process.env.email, // Sender address
+      to: email,                   // List of recipients
+      subject: 'Password Reset Request', // Subject line
+      text: `Here is your password reset OTP: ${OTP}\n\nThe OTP is valid for 10 minutes. If you didn't request this, please ignore this email.`, // Plain text body
+      html: `<p>Here is your password reset OTP: <strong>${OTP}</strong></p><p>The OTP is valid for 10 minutes. If you didn't request this, please ignore this email.</p>` // HTML body
+  };
+
+  // Send email
+  transporter.sendMail(mailOptions, (error, info) => {
+      if (error) {
+          return callback(error);
+      }
+      callback(null, info);
+  });
+}
+
+app.post('/register/email', (req, res) => {
+  const { email } = req.body;
 
   const checkSql = 'SELECT * FROM users WHERE email = ?';
-  connection.query(checkSql, [username], (err, results) => {
-    if (err) {
-      return res.json({ error: 'Database error during username check' });
-    }
-    if (results.length > 0) {
-      return res.json({ error: 'email already in use' });
-    }
-
-    bcrypt.hash(password, 10, (err, hash) => {
+  connection.query(checkSql, [email], (err, results) => {
       if (err) {
-        return res.json({ error: 'Error hashing password' });
+          console.error('Database error during email check:', err);
+          return res.status(500).json({ error: 'Internal server error' });
       }
-      const sql = 'INSERT INTO users (email, password) VALUES (?, ?)';
-      connection.query(sql, [username, hash], (err, result) => {
-        if (err) {
-          return res.json({ error: 'Database error during registration' });
-        }
-        res.status(201).json({ message: 'User registered successfully' });
+      if (results.length > 0) {
+          return res.status(400).json({ error: 'Email already in use' });
+      }
+
+      const otp = generateOtp();
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes from now
+
+      // Save OTP in your database with expiration time
+      const saveOtpSql = 'INSERT INTO otps (email, otp, expires_at) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE otp = ?, expires_at = ?';
+      connection.query(saveOtpSql, [email, otp, expiresAt, otp, expiresAt], (err, result) => {
+          if (err) {
+              console.error('Database error during OTP save:', err);
+              return res.status(500).json({ error: 'Internal server error' });
+          }
+
+          // Use the sendOtpEmail function to send the OTP email
+          sendOtpEmail(email, otp, (error, info) => {
+              if (error) {
+                  console.error('Error sending OTP email:', error);
+                  return res.status(500).json({ error: 'Error sending OTP email' });
+              }
+              res.status(200).json({ message: 'OTP sent to email' });
+          });
       });
-    });
   });
 });
 
+
+
+// Step 2: Verify OTP
+app.post('/register/verify-otp', (req, res) => {
+  const { email, otp } = req.body;
+
+  const verifyOtpSql = 'SELECT otp, expires_at FROM otps WHERE email = ? AND otp = ?';
+  connection.query(verifyOtpSql, [email, otp], (err, results) => {
+      if (err) {
+          console.error('Database error during OTP verification:', err);
+          return res.status(500).json({ error: 'Internal server error' });
+      }
+      if (results.length === 0) {
+          return res.status(400).json({ error: 'Invalid OTP' });
+      }
+
+      const { expires_at } = results[0];
+      const now = new Date();
+
+      if (now > new Date(expires_at)) {
+          // OTP has expired
+          return res.status(400).json({ error: 'OTP has expired' });
+      }
+
+      // OTP verified and valid, now the user can proceed to set a password
+      res.status(200).json({ message: 'OTP verified, you can set your password now' });
+  });
+});
+
+
+// Step 3: Register User
+app.post('/register/set-password', (req, res) => {
+  const { email, password } = req.body;
+
+  bcrypt.hash(password, 10, (err, hash) => {
+      if (err) {
+          return res.json({ error: 'Error hashing password' });
+      }
+
+      const sql = 'INSERT INTO users (email, password) VALUES (?, ?)';
+      connection.query(sql, [email, hash], (err, result) => {
+          if (err) {
+              return res.json({ error: 'Database error during registration' });
+          }
+
+          // Remove the OTP entry as it's no longer needed
+          const deleteOtpSql = 'DELETE FROM otps WHERE email = ?';
+          connection.query(deleteOtpSql, [email], (err, result) => {
+              if (err) {
+                  return res.json({ error: 'Database error during OTP cleanup' });
+              }
+
+              res.status(201).json({ message: 'User registered successfully' });
+          });
+      });
+  });
+});
+
+
+app.post('/resend-otp', (req, res) => {
+  const { email } = req.body;
+
+  const findOtpSql = 'SELECT otp, expires_at FROM otps WHERE email = ?';
+  connection.query(findOtpSql, [email], (err, results) => {
+      if (err) {
+          console.error('Database error during OTP lookup:', err);
+          return res.status(500).json({ error: 'Internal server error' });
+      }
+      if (results.length === 0) {
+          return res.status(400).json({ error: 'No OTP found for this email. Please register first.' });
+      }
+
+      const { otp, expires_at } = results[0];
+      const now = new Date();
+
+      if (now > new Date(expires_at)) {
+          // If OTP has expired, generate a new one
+          const newOtp = generateOtp();
+          const newExpiresAt = new Date(now.getTime() + 10 * 60 * 1000); // 10 minutes from now
+          const updateOtpSql = 'UPDATE otps SET otp = ?, expires_at = ? WHERE email = ?';
+          connection.query(updateOtpSql, [newOtp, newExpiresAt, email], (err, result) => {
+              if (err) {
+                  console.error('Database error during OTP update:', err);
+                  return res.status(500).json({ error: 'Internal server error' });
+              }
+
+              // Send the new OTP
+              sendOtpEmail(email, newOtp, (error, info) => {
+                  if (error) {
+                      console.error('Error sending new OTP email:', error);
+                      return res.status(500).json({ error: 'Error sending OTP email' });
+                  }
+                  res.status(200).json({ message: 'New OTP sent to email' });
+              });
+          });
+      } else {
+          // OTP is still valid, resend the existing one
+          sendOtpEmail(email, otp, (error, info) => {
+              if (error) {
+                  console.error('Error resending OTP email:', error);
+                  return res.status(500).json({ error: 'Error sending OTP email' });
+              }
+              res.status(200).json({ message: 'OTP resent to email' });
+          });
+      }
+  });
+});
+
+
+
+app.post('/forgot-password', (req, res) => {
+  const { email } = req.body;
+
+  // Check if the email exists
+  const userCheckSql = 'SELECT * FROM users WHERE email = ?';
+  connection.query(userCheckSql, [email], (err, results) => {
+      if (err) {
+          console.error('Database error during email check:', err);
+          return res.status(500).json({ error: 'Internal server error' });
+      }
+      if (results.length === 0) {
+          return res.status(400).json({ error: 'Email not found' });
+      }
+
+      const otp = generateOtp(); // Implement otp generation
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes from now
+
+      // Save otp and expiration time in the database
+      const saveOtpSql = 'INSERT INTO password_resets (email, otp, expires_at) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE otp = ?, expires_at = ?';
+      connection.query(saveOtpSql, [email, otp, expiresAt, otp, expiresAt], (err, result) => {
+          if (err) {
+              console.error('Database error during otp save:', err);
+              return res.status(500).json({ error: 'Internal server error' });
+          }
+
+          // Send otp via email
+          sendResetOTPEmail(email, otp, (error, info) => {
+              if (error) {
+                  console.error('Error sending reset otp email:', error);
+                  return res.status(500).json({ error: 'Error sending reset otp email' });
+              }
+              res.status(200).json({ message: 'Password reset otp sent to email' });
+          });
+      });
+  });
+});
+
+app.post('/verify-reset-otp', (req, res) => {
+  const { email, otp } = req.body;
+
+  const verifyOtpSql = 'SELECT otp, expires_at FROM password_resets WHERE email = ? AND otp = ?';
+  connection.query(verifyOtpSql, [email, otp], (err, results) => {
+      if (err) {
+          console.error('Database error during otp verification:', err);
+          return res.status(500).json({ error: 'Internal server error' });
+      }
+      if (results.length === 0) {
+          return res.status(400).json({ error: 'Invalid or expired otp' });
+      }
+
+      const { expires_at } = results[0];
+      const now = new Date();
+
+      if (now > new Date(expires_at)) {
+          // otp has expired
+          return res.status(400).json({ error: 'otp has expired' });
+      }
+
+      // otp is valid
+      res.status(200).json({ message: 'otp is valid, you can set a new password' });
+  });
+});
+
+app.post('/reset-password', (req, res) => {
+    const { email, otp, newPassword } = req.body;
+
+    // Verify the OTP
+    const verifyOtpSql = 'SELECT expires_at FROM password_resets WHERE email = ? AND otp = ?';
+    connection.query(verifyOtpSql, [email, otp], (err, results) => {
+        if (err) {
+            console.error('Database error during OTP verification:', err);
+            return res.status(500).json({ error: 'Internal server error' });
+        }
+        if (results.length === 0) {
+            return res.status(400).json({ error: 'Invalid or expired OTP' });
+        }
+
+        const { expires_at } = results[0];
+        const now = new Date();
+
+        if (now > new Date(expires_at)) {
+            // OTP has expired
+            return res.status(400).json({ error: 'OTP has expired' });
+        }
+
+        // OTP is valid, hash the new password
+        bcrypt.hash(newPassword, 10, (err, hashedPassword) => {
+            if (err) {
+                console.error('Error hashing password:', err); // Log the detailed error
+                return res.status(500).json({ error: 'Error hashing password' });
+            }
+
+            // Update the user's password
+            const updatePasswordSql = 'UPDATE users SET password = ? WHERE email = ?';
+            connection.query(updatePasswordSql, [hashedPassword, email], (err, result) => {
+                if (err) {
+                    console.error('Database error during password update:', err);
+                    return res.status(500).json({ error: 'Internal server error' });
+                }
+
+                // Optionally, delete the used OTP
+                const deleteOtpSql = 'DELETE FROM password_resets WHERE email = ? AND otp = ?';
+                connection.query(deleteOtpSql, [email, otp], (err, result) => {
+                    if (err) {
+                        console.error('Database error during OTP deletion:', err);
+                    }
+                    res.status(200).json({ message: 'Password has been updated successfully' });
+                });
+            });
+        });
+    });
+});
+
+
+
+
 // Login route
 app.post('/login', (req, res) => {
-  const { username, password } = req.body;
+  const { email, password } = req.body;
 
   // Check if the user is locked out
-  if (failedLoginAttempts[username] && failedLoginAttempts[username].count >= 5) {
+  if (failedLoginAttempts[email] && failedLoginAttempts[email].count >= 5) {
     const now = Date.now();
-    const timeSinceLastAttempt = now - failedLoginAttempts[username].lastAttempt;
+    const timeSinceLastAttempt = now - failedLoginAttempts[email].lastAttempt;
     if (timeSinceLastAttempt < 300000) { // 5 minutes in milliseconds
       return res.status(429).send({ message: 'Too many failed login attempts. Try again in 5 minutes.' });
     } else {
       // Reset the failed attempts counter after the lockout period
-      failedLoginAttempts[username].count = 0;
+      failedLoginAttempts[email].count = 0;
     }
   }
 
   const sql = 'SELECT * FROM users WHERE email = ?';
-  connection.query(sql, [username], (err, results) => {
+  connection.query(sql, [email], (err, results) => {
     if (err) throw err;
 
     if (results.length === 0) {
@@ -106,20 +402,20 @@ app.post('/login', (req, res) => {
 
       if (!isMatch) {
         // Track the failed login attempt
-        if (!failedLoginAttempts[username]) {
-          failedLoginAttempts[username] = { count: 1, lastAttempt: Date.now() };
+        if (!failedLoginAttempts[email]) {
+          failedLoginAttempts[email] = { count: 1, lastAttempt: Date.now() };
         } else {
-          failedLoginAttempts[username].count++;
-          failedLoginAttempts[username].lastAttempt = Date.now();
+          failedLoginAttempts[email].count++;
+          failedLoginAttempts[email].lastAttempt = Date.now();
         }
 
-        const remainingAttempts = 5 - failedLoginAttempts[username].count;
+        const remainingAttempts = 5 - failedLoginAttempts[email].count;
         return res.send({ message: `Password is incorrect. You have ${remainingAttempts} attempts left.` });
       }
 
       // Reset the failed attempts counter on successful login
-      if (failedLoginAttempts[username]) {
-        failedLoginAttempts[username].count = 0;
+      if (failedLoginAttempts[email]) {
+        failedLoginAttempts[email].count = 0;
       }
 
       const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, { expiresIn: '1h' });
@@ -191,7 +487,7 @@ app.post('/google-signin', async (req, res) => {
             token: jwtToken,
             user: {
               id: userId,
-              username: email,
+              email: email,
               google_id: googleId,
               name,
               email,
