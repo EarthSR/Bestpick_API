@@ -5,6 +5,8 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const admin = require('firebase-admin');
 const cors = require('cors');
+const axios = require('axios');
+const fs = require('fs');
 require('dotenv').config();
 
 const app = express();
@@ -14,6 +16,7 @@ app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(cors()); // Enable CORS
 
+
 // Initialize Firebase Admin SDK
 const serviceAccount = require('./config/apilogin-6efd6-firebase-adminsdk-b3l6z-c2e5fe541a.json');
 
@@ -22,17 +25,24 @@ admin.initializeApp({
   // Optionally you can add databaseURL here
 });
 
-// Database connection
+// Database connection (TiDB compatible with SSL)
 const connection = mysql.createConnection({
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME
+  database: process.env.DB_NAME,
+  port: process.env.DB_PORT,
+  ssl: {
+    ca: fs.readFileSync('./certs/isrgrootx1.pem'), // Replace with the actual path to your CA certificate
+  }
 });
 
 connection.connect(err => {
-  if (err) throw err;
-  console.log('Connected to the MySQL server.');
+  if (err) {
+    console.error('Error connecting to the database:', err);
+    return;
+  }
+  console.log('Connected to the TiDB server.');
 });
 
 // In-memory store for failed login attempts
@@ -42,20 +52,20 @@ const failedLoginAttempts = {};
 app.post('/register', (req, res) => {
   const { username, password } = req.body;
 
-  const checkSql = 'SELECT * FROM users WHERE username = ?';
+  const checkSql = 'SELECT * FROM users WHERE email = ?';
   connection.query(checkSql, [username], (err, results) => {
     if (err) {
       return res.json({ error: 'Database error during username check' });
     }
     if (results.length > 0) {
-      return res.json({ error: 'Username already in use' });
+      return res.json({ error: 'email already in use' });
     }
 
     bcrypt.hash(password, 10, (err, hash) => {
       if (err) {
         return res.json({ error: 'Error hashing password' });
       }
-      const sql = 'INSERT INTO users (username, password) VALUES (?, ?)';
+      const sql = 'INSERT INTO users (email, password) VALUES (?, ?)';
       connection.query(sql, [username, hash], (err, result) => {
         if (err) {
           return res.json({ error: 'Database error during registration' });
@@ -82,7 +92,7 @@ app.post('/login', (req, res) => {
     }
   }
 
-  const sql = 'SELECT * FROM users WHERE username = ?';
+  const sql = 'SELECT * FROM users WHERE email = ?';
   connection.query(sql, [username], (err, results) => {
     if (err) throw err;
 
@@ -195,6 +205,87 @@ app.post('/google-signin', async (req, res) => {
     res.status(401).json({ error: 'Invalid Firebase token' });
   }
 });
+
+
+
+// Verify Facebook token and get user data
+async function verifyFacebookToken(token) {
+  try {
+    const response = await axios.get('https://graph.facebook.com/me', {
+      params: {
+        access_token: token,
+        fields: 'id,name,email,picture',
+      },
+    });
+    return response.data;
+  } catch (error) {
+    console.error('Error verifying Facebook token:', error);
+    throw new Error('Invalid Facebook token');
+  }
+}
+
+// Facebook Sign-In route
+app.post('/facebook-signin', async (req, res) => {
+  const { token } = req.body;
+
+  try {
+    // Verify and decode the Facebook token
+    const userData = await verifyFacebookToken(token);
+    console.log('Decoded Token:', userData);
+
+    const { id: facebookId, name, email, picture } = userData;
+    const pictureUrl = picture?.data?.url || ''; // Ensure picture URL exists
+
+    // Check if the user already exists in the database
+    const checkSql = 'SELECT * FROM users WHERE facebook_id = ?';
+    connection.query(checkSql, [facebookId], (err, results) => {
+      if (err) {
+        console.error('Database error during Facebook ID check:', err);
+        return res.status(500).json({ error: 'Database error during Facebook ID check' });
+      }
+
+      if (results.length > 0) {
+        // User exists, log them in
+        const user = results[0];
+        const jwtToken = jwt.sign({ id: user.id }, process.env.JWT_SECRET, { expiresIn: '1h' });
+
+        return res.json({
+          message: 'Authentication successful',
+          token: jwtToken,
+          user,
+        });
+      } else {
+        // User doesn't exist, register them
+        const registerSql = 'INSERT INTO users (facebook_id, name, email, picture) VALUES (?, ?, ?, ?)';
+        connection.query(registerSql, [facebookId, name, email, pictureUrl], (err, result) => {
+          if (err) {
+            console.error('Database error during Facebook registration:', err);
+            return res.status(500).json({ error: 'Database error during Facebook registration' });
+          }
+
+          const userId = result.insertId;
+          const jwtToken = jwt.sign({ id: userId }, process.env.JWT_SECRET, { expiresIn: '1h' });
+
+          return res.status(201).json({
+            message: 'User registered and authenticated successfully',
+            token: jwtToken,
+            user: {
+              id: userId,
+              facebook_id: facebookId,
+              name,
+              email,
+              picture: pictureUrl,
+            },
+          });
+        });
+      }
+    });
+  } catch (error) {
+    console.error('Facebook authentication error:', error);
+    res.status(401).json({ error: 'Invalid Facebook token' });
+  }
+});
+
 
 // Start the server
 const PORT = process.env.PORT || 3000;
