@@ -445,62 +445,78 @@ async function verifyFirebaseToken(token) {
   }
 }
 
-// Google Sign-In route
-app.post('/google-signin', async (req, res) => {
-  const { token } = req.body;
+app.post('/google-signin', (req, res) => {
+  const { googleId, email, name, picture } = req.body;
 
-  try {
-    const decodedToken = await verifyFirebaseToken(token);
-    console.log('Decoded Token:', decodedToken); // Log decoded token
-    const { email, uid: googleId, name, picture } = decodedToken;
+  // Validate the input
+  if (!googleId || !email || !name || !picture) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
 
-    // Check if the user already exists
-    const checkSql = 'SELECT * FROM users WHERE google_id = ?';
-    connection.query(checkSql, [googleId], (err, results) => {
-      if (err) {
-        return res.status(500).json({ error: 'Database error during Google ID check' });
-      }
+  console.log('Received data from client:', { googleId, email, name, picture });
 
-      if (results.length > 0) {
-        // User exists, log them in
-        const user = results[0];
-        const jwtToken = jwt.sign({ id: user.id }, process.env.JWT_SECRET, { expiresIn: '1h' });
+  // Check if the user already exists in the database
+  const checkSql = 'SELECT * FROM users WHERE google_id = ? OR email = ?';
+  connection.query(checkSql, [googleId, email], (err, results) => {
+    if (err) {
+      console.error('Database error during Google ID or email check:', err);
+      return res.status(500).json({ error: 'Database error during check' });
+    }
 
-        return res.json({
-          message: 'Authentication successful',
-          token: jwtToken,
-          user
-        });
-      } else {
-        // User doesn't exist, register them
-        const registerSql = 'INSERT INTO users (google_id, name, email, picture) VALUES (?, ?, ?, ?)';
-        connection.query(registerSql, [googleId, name, email, picture], (err, result) => {
+    if (results.length > 0) {
+      // User exists, return user info
+      const user = results[0];
+      return res.json({
+        message: 'User information fetched successfully',
+        user: {
+          id: user.id,
+          email: user.email,
+          google_id: user.google_id,
+          name: user.name,
+          picture: user.picture
+        }
+      });
+    } else {
+      // User does not exist, insert new user
+      const insertSql = 'INSERT INTO users (google_id, email, name, picture) VALUES (?, ?, ?, ?)';
+      connection.query(insertSql, [googleId, email, name, picture], (err, result) => {
+        if (err) {
+          if (err.code === 'ER_DUP_ENTRY') {
+            console.error('Duplicate entry error:', err);
+            return res.status(409).json({ error: 'Email already registered' });
+          } else {
+            console.error('Database error during user insertion:', err);
+            return res.status(500).json({ error: 'Database error during registration' });
+          }
+        }
+
+        // Fetch the newly inserted user
+        const newUserId = result.insertId;
+        const newUserSql = 'SELECT * FROM users WHERE id = ?';
+        connection.query(newUserSql, [newUserId], (err, results) => {
           if (err) {
-            return res.status(500).json({ error: 'Database error during Google registration' });
+            console.error('Database error during new user fetch:', err);
+            return res.status(500).json({ error: 'Database error during new user fetch' });
           }
 
-          const userId = result.insertId;
-          const jwtToken = jwt.sign({ id: userId }, process.env.JWT_SECRET, { expiresIn: '1h' });
-
+          const newUser = results[0];
           return res.status(201).json({
-            message: 'User registered and authenticated successfully',
-            token: jwtToken,
+            message: 'successfully',
             user: {
-              id: userId,
-              email: email,
-              google_id: googleId,
-              name,
-              email,
-              picture
+              id: newUser.id,
+              email: newUser.email,
+              google_id: newUser.google_id,
+              name: newUser.name,
+              picture: newUser.picture
             }
           });
         });
-      }
-    });
-  } catch (error) {
-    res.status(401).json({ error: 'Invalid Firebase token' });
-  }
+      });
+    }
+  });
 });
+
+
 
 
 
