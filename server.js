@@ -10,7 +10,7 @@ const fs = require('fs');
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 require('dotenv').config();
-
+const JWT_SECRET = process.env.JWT_SECRET;
 const app = express();
 
 // Middleware
@@ -49,7 +49,7 @@ connection.connect(err => {
 });
 
 // In-memory store for failed login attempts
-const failedLoginAttempts = {};
+
 
 // Generate OTP
 function generateOtp() {
@@ -120,7 +120,7 @@ app.post('/register/email', (req, res) => {
           return res.status(500).json({ error: 'Internal server error' });
       }
       if (results.length > 0) {
-          return res.status(400).json({ error: 'Email already in use' });
+          return res.status(400).json({ error: 'Email already in use or use in another sign-in' });
       }
 
       const otp = generateOtp();
@@ -371,79 +371,88 @@ app.post('/reset-password', (req, res) => {
 
 
 
+const failedLoginAttempts = {}; // Initialize this globally
 
 // Login route
 app.post('/login', (req, res) => {
   const { email, password } = req.body;
 
+  // Initialize failed attempts entry if it doesn't exist
+  if (!failedLoginAttempts[email]) {
+    failedLoginAttempts[email] = { count: 0, lastAttempt: Date.now() };
+  }
+
   // Check if the user is locked out
-  if (failedLoginAttempts[email] && failedLoginAttempts[email].count >= 5) {
+  if (failedLoginAttempts[email].count >= 5) {
     const now = Date.now();
     const timeSinceLastAttempt = now - failedLoginAttempts[email].lastAttempt;
     if (timeSinceLastAttempt < 300000) { // 5 minutes in milliseconds
-      return res.status(429).send({ message: 'Too many failed login attempts. Try again in 5 minutes.' });
+      return res.status(429).json({ message: 'Too many failed login attempts. Try again in 5 minutes.' });
     } else {
       // Reset the failed attempts counter after the lockout period
       failedLoginAttempts[email].count = 0;
     }
   }
 
-  const sql = 'SELECT * FROM users WHERE email = ?';
+  const sql = 'SELECT id, password FROM users WHERE email = ?';
   connection.query(sql, [email], (err, results) => {
-    if (err) throw err;
+    if (err) {
+      console.error('Database error:', err);
+      return res.status(500).json({ error: 'Database error' });
+    }
 
     if (results.length === 0) {
-      return res.send({ message: 'No user found' });
+      return res.status(404).json({ message: 'No user found' });
     }
 
     const user = results[0];
+
+    // Check if password is null
+    if (user.password === null) {
+      return res.status(400).json({ message: 'Email already used for another sign-in.' });
+    }
+
     bcrypt.compare(password, user.password, (err, isMatch) => {
-      if (err) throw err;
+      if (err) {
+        console.error('Password comparison error:', err);
+        return res.status(500).json({ error: 'Error comparing passwords' });
+      }
 
       if (!isMatch) {
         // Track the failed login attempt
-        if (!failedLoginAttempts[email]) {
-          failedLoginAttempts[email] = { count: 1, lastAttempt: Date.now() };
-        } else {
-          failedLoginAttempts[email].count++;
-          failedLoginAttempts[email].lastAttempt = Date.now();
-        }
+        failedLoginAttempts[email].count++;
+        failedLoginAttempts[email].lastAttempt = Date.now();
 
         const remainingAttempts = 5 - failedLoginAttempts[email].count;
-        return res.send({ message: `Password is incorrect. You have ${remainingAttempts} attempts left.` });
+        return res.status(401).json({ message: `Password is incorrect. You have ${remainingAttempts} attempts left.` });
       }
 
       // Reset the failed attempts counter on successful login
-      if (failedLoginAttempts[email]) {
-        failedLoginAttempts[email].count = 0;
-      }
+      failedLoginAttempts[email].count = 0;
 
-      const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, { expiresIn: '1h' });
+      const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET);
 
-      // Fetch all user data
+      // Fetch user data
       const userSql = 'SELECT * FROM users WHERE id = ?';
       connection.query(userSql, [user.id], (err, userData) => {
-        if (err) throw err;
+        if (err) {
+          console.error('Database error fetching user data:', err);
+          return res.status(500).json({ error: 'Error fetching user data' });
+        }
 
-        res.send({
+        // Ensure userData has the expected structure
+        const user = userData.length > 0 ? userData[0] : null;
+
+        res.status(200).json({
           message: 'Authentication successful',
           token,
-          user: userData[0]
+          user
         });
       });
     });
   });
 });
 
-// Verify Firebase ID Token
-async function verifyFirebaseToken(token) {
-  try {
-    const decodedToken = await admin.auth().verifyIdToken(token);
-    return decodedToken;
-  } catch (error) {
-    throw new Error('Invalid Firebase token');
-  }
-}
 
 app.post('/google-signin', (req, res) => {
   const { googleId, email, name, picture } = req.body;
@@ -455,26 +464,45 @@ app.post('/google-signin', (req, res) => {
 
   console.log('Received data from client:', { googleId, email, name, picture });
 
-  // Check if the user already exists in the database
-  const checkSql = 'SELECT * FROM users WHERE google_id = ? OR email = ?';
-  connection.query(checkSql, [googleId, email], (err, results) => {
+  // Check if the user already exists in the database based on googleId
+  const checkSql = 'SELECT * FROM users WHERE google_id = ?';
+  connection.query(checkSql, [googleId], (err, results) => {
     if (err) {
-      console.error('Database error during Google ID or email check:', err);
+      console.error('Database error during Google ID check:', err);
       return res.status(500).json({ error: 'Database error during check' });
     }
 
     if (results.length > 0) {
-      // User exists, return user info
+      // User exists, update their information
       const user = results[0];
-      return res.json({
-        message: 'User information fetched successfully',
-        user: {
-          id: user.id,
-          email: user.email,
-          google_id: user.google_id,
-          name: user.name,
-          picture: user.picture
+      const updateSql = `
+        UPDATE users 
+        SET email = ?, name = ?, picture = ? 
+        WHERE google_id = ?
+      `;
+      connection.query(updateSql, [email, name, picture, googleId], (err) => {
+        if (err) {
+          console.error('Database error during user update:', err);
+          return res.status(500).json({ error: 'Database error during update' });
         }
+
+        const token = jwt.sign(
+          { id: user.id, email: user.email, google_id: user.google_id },
+          process.env.JWT_SECRET, // Ensure you use process.env.JWT_SECRET
+          
+        );
+        console.log('User updated:', { token, googleId, email, name, picture });
+        return res.json({
+          message: 'User information updated successfully',
+          token,
+          user: {
+            id: user.id,
+            email: user.email,
+            google_id: user.google_id,
+            name: user.name,
+            picture: user.picture,
+          },
+        });
       });
     } else {
       // User does not exist, insert new user
@@ -500,15 +528,22 @@ app.post('/google-signin', (req, res) => {
           }
 
           const newUser = results[0];
+          const token = jwt.sign(
+            { id: newUser.id, email: newUser.email, google_id: newUser.google_id },
+            process.env.JWT_SECRET, // Ensure you use process.env.JWT_SECRET
+            
+          );
+
           return res.status(201).json({
-            message: 'successfully',
+            message: 'User registered and authenticated successfully',
+            token,
             user: {
               id: newUser.id,
               email: newUser.email,
               google_id: newUser.google_id,
               name: newUser.name,
-              picture: newUser.picture
-            }
+              picture: newUser.picture,
+            },
           });
         });
       });
@@ -519,35 +554,11 @@ app.post('/google-signin', (req, res) => {
 
 
 
-
-// Verify Facebook token and get user data
-async function verifyFacebookToken(token) {
-  try {
-    const response = await axios.get('https://graph.facebook.com/me', {
-      params: {
-        access_token: token,
-        fields: 'id,name,email,picture',
-      },
-    });
-    return response.data;
-  } catch (error) {
-    console.error('Error verifying Facebook token:', error);
-    throw new Error('Invalid Facebook token');
-  }
-}
-
 // Facebook Sign-In route
 app.post('/facebook-signin', async (req, res) => {
-  const { token } = req.body;
+  const { facebookId, email, name, picture } = req.body;
 
   try {
-    // Verify and decode the Facebook token
-    const userData = await verifyFacebookToken(token);
-    console.log('Decoded Token:', userData);
-
-    const { id: facebookId, name, email, picture } = userData;
-    const pictureUrl = picture?.data?.url || ''; // Ensure picture URL exists
-
     // Check if the user already exists in the database
     const checkSql = 'SELECT * FROM users WHERE facebook_id = ?';
     connection.query(checkSql, [facebookId], (err, results) => {
@@ -557,27 +568,44 @@ app.post('/facebook-signin', async (req, res) => {
       }
 
       if (results.length > 0) {
-        // User exists, log them in
+        // User exists, update their information
         const user = results[0];
-        const jwtToken = jwt.sign({ id: user.id }, process.env.JWT_SECRET, { expiresIn: '1h' });
+        const updateSql = 'UPDATE users SET name = ?, email = ?, picture = ? WHERE facebook_id = ?';
+        connection.query(updateSql, [name, email, picture, facebookId], (err) => {
+          if (err) {
+            console.error('Database error during Facebook update:', err);
+            return res.status(500).json({ error: 'Database error during Facebook update' });
+          }
 
-        return res.json({
-          message: 'Authentication successful',
-          token: jwtToken,
-          user,
+          const jwtToken = jwt.sign({ id: user.id }, process.env.JWT_SECRET);
+          return res.json({
+            message: 'User information updated successfully',
+            token: jwtToken,
+            user: {
+              id: user.id,
+              facebook_id: facebookId,
+              name,
+              email,
+              picture,
+            },
+          });
         });
       } else {
         // User doesn't exist, register them
         const registerSql = 'INSERT INTO users (facebook_id, name, email, picture) VALUES (?, ?, ?, ?)';
-        connection.query(registerSql, [facebookId, name, email, pictureUrl], (err, result) => {
+        connection.query(registerSql, [facebookId, name, email, picture], (err, result) => {
           if (err) {
-            console.error('Database error during Facebook registration:', err);
-            return res.status(500).json({ error: 'Database error during Facebook registration' });
+            if (err.code === 'ER_DUP_ENTRY') {
+              console.error('Duplicate entry error:', err);
+              return res.status(409).json({ error: 'Email already registered' });
+            } else {
+              console.error('Database error during user insertion:', err);
+              return res.status(500).json({ error: 'Database error during registration' });
+            }
           }
 
           const userId = result.insertId;
-          const jwtToken = jwt.sign({ id: userId }, process.env.JWT_SECRET, { expiresIn: '1h' });
-
+          const jwtToken = jwt.sign({ id: userId }, process.env.JWT_SECRET);
           return res.status(201).json({
             message: 'User registered and authenticated successfully',
             token: jwtToken,
@@ -586,7 +614,7 @@ app.post('/facebook-signin', async (req, res) => {
               facebook_id: facebookId,
               name,
               email,
-              picture: pictureUrl,
+              picture,
             },
           });
         });
@@ -597,6 +625,9 @@ app.post('/facebook-signin', async (req, res) => {
     res.status(401).json({ error: 'Invalid Facebook token' });
   }
 });
+
+
+
 
 
 // Start the server
