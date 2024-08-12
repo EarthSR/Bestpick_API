@@ -54,7 +54,7 @@ connection.connect(err => {
 // Generate OTP
 function generateOtp() {
   const otp = crypto.randomBytes(3).toString('hex'); // 3 bytes = 6 hex characters
-  return parseInt(otp, 16).toString().slice(0, 6); // Convert to an integer and then take the first 6 digits
+  return parseInt(otp, 16).toString().slice(0, 4); // Convert to an integer and then take the first 6 digits
 }
 
 // Send OTP to the user's email
@@ -120,31 +120,56 @@ app.post('/register/email', (req, res) => {
           return res.status(500).json({ error: 'Internal server error' });
       }
       if (results.length > 0) {
-          return res.status(400).json({ error: 'Email already in use or use in another sign-in' });
+          return res.status(400).json({ error: 'Email already in use or used in another sign-in' });
       }
 
-      const otp = generateOtp();
+      const otp = generateOtp(); // Implement this function to generate a random OTP
       const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes from now
 
-      // Save OTP in your database with expiration time
-      const saveOtpSql = 'INSERT INTO otps (email, otp, expires_at) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE otp = ?, expires_at = ?';
-      connection.query(saveOtpSql, [email, otp, expiresAt, otp, expiresAt], (err, result) => {
+      const findOtpSql = 'SELECT * FROM otps WHERE email = ?';
+      connection.query(findOtpSql, [email], (err, otpResults) => {
           if (err) {
-              console.error('Database error during OTP save:', err);
+              console.error('Database error during OTP retrieval:', err);
               return res.status(500).json({ error: 'Internal server error' });
           }
 
-          // Use the sendOtpEmail function to send the OTP email
-          sendOtpEmail(email, otp, (error, info) => {
-              if (error) {
-                  console.error('Error sending OTP email:', error);
-                  return res.status(500).json({ error: 'Error sending OTP email' });
-              }
-              res.status(200).json({ message: 'OTP sent to email' });
-          });
+          if (otpResults.length > 0) {
+              // Update existing OTP
+              const updateOtpSql = 'UPDATE otps SET otp = ?, expires_at = ? WHERE email = ?';
+              connection.query(updateOtpSql, [otp, expiresAt, email], (err, updateResult) => {
+                  if (err) {
+                      console.error('Database error during OTP update:', err);
+                      return res.status(500).json({ error: 'Internal server error' });
+                  }
+                  sendOtpEmail(email, otp, (error, info) => {
+                      if (error) {
+                          console.error('Error sending OTP email:', error);
+                          return res.status(500).json({ error: 'Error sending OTP email' });
+                      }
+                      res.status(200).json({ message: 'OTP sent to email' });
+                  });
+              });
+          } else {
+              // Insert new OTP
+              const insertOtpSql = 'INSERT INTO otps (email, otp, expires_at) VALUES (?, ?, ?)';
+              connection.query(insertOtpSql, [email, otp, expiresAt], (err, insertResult) => {
+                  if (err) {
+                      console.error('Database error during OTP insertion:', err);
+                      return res.status(500).json({ error: 'Internal server error' });
+                  }
+                  sendOtpEmail(email, otp, (error, info) => {
+                      if (error) {
+                          console.error('Error sending OTP email:', error);
+                          return res.status(500).json({ error: 'Error sending OTP email' });
+                      }
+                      res.status(200).json({ message: 'OTP sent to email' });
+                  });
+              });
+          }
       });
   });
 });
+
 
 
 
@@ -261,113 +286,175 @@ app.post('/forgot-password', (req, res) => {
 
   // Check if the email exists
   const userCheckSql = 'SELECT * FROM users WHERE email = ?';
-  connection.query(userCheckSql, [email], (err, results) => {
+  connection.query(userCheckSql, [email], (err, userResults) => {
       if (err) {
           console.error('Database error during email check:', err);
           return res.status(500).json({ error: 'Internal server error' });
       }
-      if (results.length === 0) {
+      if (userResults.length === 0) {
           return res.status(400).json({ error: 'Email not found' });
       }
 
-      const otp = generateOtp(); // Implement otp generation
+      const otp = generateOtp(); // Implement OTP generation securely
       const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes from now
 
-      // Save otp and expiration time in the database
-      const saveOtpSql = 'INSERT INTO password_resets (email, otp, expires_at) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE otp = ?, expires_at = ?';
-      connection.query(saveOtpSql, [email, otp, expiresAt, otp, expiresAt], (err, result) => {
+      // Check if an OTP already exists for this email
+      const otpCheckSql = 'SELECT * FROM password_resets WHERE email = ?';
+      connection.query(otpCheckSql, [email], (err, otpResults) => {
           if (err) {
-              console.error('Database error during otp save:', err);
+              console.error('Database error during OTP check:', err);
               return res.status(500).json({ error: 'Internal server error' });
           }
 
-          // Send otp via email
-          sendResetOTPEmail(email, otp, (error, info) => {
-              if (error) {
-                  console.error('Error sending reset otp email:', error);
-                  return res.status(500).json({ error: 'Error sending reset otp email' });
-              }
-              res.status(200).json({ message: 'Password reset otp sent to email' });
-          });
+          if (otpResults.length > 0) {
+              // Update existing OTP
+              const updateOtpSql = 'UPDATE password_resets SET otp = ?, expires_at = ? WHERE email = ?';
+              connection.query(updateOtpSql, [otp, expiresAt, email], (err, updateResult) => {
+                  if (err) {
+                      console.error('Database error during OTP update:', err);
+                      return res.status(500).json({ error: 'Internal server error' });
+                  }
+                  sendOtpEmail(email, otp, (error, info) => {
+                      if (error) {
+                          console.error('Error sending OTP email:', error);
+                          return res.status(500).json({ error: 'Error sending OTP email' });
+                      }
+                      res.status(200).json({ message: 'OTP sent to email' });
+                  });
+              });
+          } else {
+              // Save new OTP
+              const saveOtpSql = 'INSERT INTO password_resets (email, otp, expires_at) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE otp = VALUES(otp), expires_at = VALUES(expires_at)';
+              connection.query(saveOtpSql, [email, otp, expiresAt, otp, expiresAt], (err, result) => {
+                  if (err) {
+                      console.error('Database error during OTP save:', err);
+                      return res.status(500).json({ error: 'Internal server error' });
+                  }
+                  sendOtpEmail(email, otp, (error, info) => {
+                      if (error) {
+                          console.error('Error sending OTP email:', error);
+                          return res.status(500).json({ error: 'Error sending OTP email' });
+                      }
+                      res.status(200).json({ message: 'OTP sent to email' });
+                  });
+              });
+          }
       });
   });
 });
 
+
+
 app.post('/verify-reset-otp', (req, res) => {
   const { email, otp } = req.body;
+
+  if (!email || !otp) {
+      return res.status(400).json({ error: 'Email and OTP are required' });
+  }
 
   const verifyOtpSql = 'SELECT otp, expires_at FROM password_resets WHERE email = ? AND otp = ?';
   connection.query(verifyOtpSql, [email, otp], (err, results) => {
       if (err) {
-          console.error('Database error during otp verification:', err);
+          console.error('Database error during OTP verification:', err);
           return res.status(500).json({ error: 'Internal server error' });
       }
       if (results.length === 0) {
-          return res.status(400).json({ error: 'Invalid or expired otp' });
+          return res.status(400).json({ error: 'Invalid OTP or email' });
       }
 
       const { expires_at } = results[0];
       const now = new Date();
 
       if (now > new Date(expires_at)) {
-          // otp has expired
-          return res.status(400).json({ error: 'otp has expired' });
+          // OTP has expired
+          return res.status(400).json({ error: 'OTP has expired' });
       }
 
-      // otp is valid
-      res.status(200).json({ message: 'otp is valid, you can set a new password' });
+      // OTP is valid
+      res.status(200).json({ message: 'OTP is valid, you can set a new password' });
   });
 });
 
 app.post('/reset-password', (req, res) => {
-    const { email, otp, newPassword } = req.body;
+  const { email, newPassword } = req.body;
 
-    // Verify the OTP
-    const verifyOtpSql = 'SELECT expires_at FROM password_resets WHERE email = ? AND otp = ?';
-    connection.query(verifyOtpSql, [email, otp], (err, results) => {
-        if (err) {
-            console.error('Database error during OTP verification:', err);
-            return res.status(500).json({ error: 'Internal server error' });
-        }
-        if (results.length === 0) {
-            return res.status(400).json({ error: 'Invalid or expired OTP' });
-        }
+  // Hash the new password
+  bcrypt.hash(newPassword, 10, (err, hashedPassword) => {
+      if (err) {
+          console.error('Error hashing password:', err); // Log the detailed error
+          return res.status(500).json({ error: 'Error hashing password' });
+      }
 
-        const { expires_at } = results[0];
-        const now = new Date();
+      // Update the user's password
+      const updatePasswordSql = 'UPDATE users SET password = ? WHERE email = ?';
+      connection.query(updatePasswordSql, [hashedPassword, email], (err, result) => {
+          if (err) {
+              console.error('Database error during password update:', err);
+              return res.status(500).json({ error: 'Internal server error' });
+          }
 
-        if (now > new Date(expires_at)) {
-            // OTP has expired
-            return res.status(400).json({ error: 'OTP has expired' });
-        }
-
-        // OTP is valid, hash the new password
-        bcrypt.hash(newPassword, 10, (err, hashedPassword) => {
-            if (err) {
-                console.error('Error hashing password:', err); // Log the detailed error
-                return res.status(500).json({ error: 'Error hashing password' });
-            }
-
-            // Update the user's password
-            const updatePasswordSql = 'UPDATE users SET password = ? WHERE email = ?';
-            connection.query(updatePasswordSql, [hashedPassword, email], (err, result) => {
-                if (err) {
-                    console.error('Database error during password update:', err);
-                    return res.status(500).json({ error: 'Internal server error' });
-                }
-
-                // Optionally, delete the used OTP
-                const deleteOtpSql = 'DELETE FROM password_resets WHERE email = ? AND otp = ?';
-                connection.query(deleteOtpSql, [email, otp], (err, result) => {
-                    if (err) {
-                        console.error('Database error during OTP deletion:', err);
-                    }
-                    res.status(200).json({ message: 'Password has been updated successfully' });
-                });
-            });
-        });
-    });
+          // Optionally, delete the used OTP (if you want to clear the record)
+          const deleteOtpSql = 'DELETE FROM password_resets WHERE email = ?';
+          connection.query(deleteOtpSql, [email], (err, result) => {
+              if (err) {
+                  console.error('Database error during OTP deletion:', err);
+              }
+              res.status(200).json({ message: 'Password has been updated successfully' });
+          });
+      });
+  });
 });
+
+
+
+app.post('/resent-otp', (req, res) => {
+  const { email } = req.body;
+
+  // Check if the email exists
+  const userCheckSql = 'SELECT * FROM users WHERE email = ?';
+  connection.query(userCheckSql, [email], (err, userResults) => {
+      if (err) {
+          console.error('Database error during email check:', err);
+          return res.status(500).json({ error: 'Internal server error' });
+      }
+      if (userResults.length === 0) {
+          return res.status(400).json({ error: 'Email not found' });
+      }
+
+      // Check if there is an existing OTP for this email
+      const otpCheckSql = 'SELECT * FROM password_resets WHERE email = ?';
+      connection.query(otpCheckSql, [email], (err, otpResults) => {
+          if (err) {
+              console.error('Database error during OTP check:', err);
+              return res.status(500).json({ error: 'Internal server error' });
+          }
+
+          if (otpResults.length === 0) {
+              return res.status(400).json({ error: 'No OTP record found for this email' });
+          }
+
+          const otp = generateOtp(); // Implement OTP generation securely
+          const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes from now
+
+          // Update existing OTP
+          const updateOtpSql = 'UPDATE password_resets SET otp = ?, expires_at = ? WHERE email = ?';
+          connection.query(updateOtpSql, [otp, expiresAt, email], (err, updateResult) => {
+              if (err) {
+                  console.error('Database error during OTP update:', err);
+                  return res.status(500).json({ error: 'Internal server error' });
+              }
+              sendOtpEmail(email, otp, (error, info) => {
+                  if (error) {
+                      console.error('Error sending OTP email:', error);
+                      return res.status(500).json({ error: 'Error sending OTP email' });
+                  }
+                  res.status(200).json({ message: 'New OTP sent to email' });
+              });
+          });
+      });
+  });
+});
+
 
 
 
@@ -578,6 +665,7 @@ app.post('/facebook-signin', async (req, res) => {
           }
 
           const jwtToken = jwt.sign({ id: user.id }, process.env.JWT_SECRET);
+          console.log('User registered:', {jwtToken });
           return res.json({
             message: 'User information updated successfully',
             token: jwtToken,
@@ -606,6 +694,7 @@ app.post('/facebook-signin', async (req, res) => {
 
           const userId = result.insertId;
           const jwtToken = jwt.sign({ id: userId }, process.env.JWT_SECRET);
+          console.log('User registered:', {jwtToken });
           return res.status(201).json({
             message: 'User registered and authenticated successfully',
             token: jwtToken,
