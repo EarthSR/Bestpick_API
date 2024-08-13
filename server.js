@@ -542,14 +542,14 @@ app.post('/login', (req, res) => {
 
 
 app.post('/google-signin', (req, res) => {
-  const { googleId, email, name, picture } = req.body;
+  const { googleId, name, picture } = req.body;
 
   // Validate the input
-  if (!googleId || !email || !name || !picture) {
+  if (!googleId || !name || !picture) {
     return res.status(400).json({ error: 'Missing required fields' });
   }
 
-  console.log('Received data from client:', { googleId, email, name, picture });
+  console.log('Received data from client:', { googleId, name, picture });
 
   // Check if the user already exists in the database based on googleId
   const checkSql = 'SELECT * FROM users WHERE google_id = ?';
@@ -560,49 +560,15 @@ app.post('/google-signin', (req, res) => {
     }
 
     if (results.length > 0) {
-      // User exists, update their information
-      const user = results[0];
-      const updateSql = `
-        UPDATE users 
-        SET email = ?, name = ?, picture = ? 
-        WHERE google_id = ?
-      `;
-      connection.query(updateSql, [email, name, picture, googleId], (err) => {
-        if (err) {
-          console.error('Database error during user update:', err);
-          return res.status(500).json({ error: 'Database error during update' });
-        }
-
-        const token = jwt.sign(
-          { id: user.id, email: user.email, google_id: user.google_id },
-          process.env.JWT_SECRET, // Ensure you use process.env.JWT_SECRET
-          
-        );
-        console.log('User updated:', { token, googleId, email, name, picture });
-        return res.json({
-          message: 'User information updated successfully',
-          token,
-          user: {
-            id: user.id,
-            email: user.email,
-            google_id: user.google_id,
-            name: user.name,
-            picture: user.picture,
-          },
-        });
-      });
+      // User already exists
+      return res.status(409).json({ error: 'User already registered' });
     } else {
       // User does not exist, insert new user
-      const insertSql = 'INSERT INTO users (google_id, email, name, picture) VALUES (?, ?, ?, ?)';
-      connection.query(insertSql, [googleId, email, name, picture], (err, result) => {
+      const insertSql = 'INSERT INTO users (google_id, name, picture) VALUES (?, ?, ?)';
+      connection.query(insertSql, [googleId, name, picture], (err, result) => {
         if (err) {
-          if (err.code === 'ER_DUP_ENTRY') {
-            console.error('Duplicate entry error:', err);
-            return res.status(409).json({ error: 'Email already registered' });
-          } else {
-            console.error('Database error during user insertion:', err);
-            return res.status(500).json({ error: 'Database error during registration' });
-          }
+          console.error('Database error during user insertion:', err);
+          return res.status(500).json({ error: 'Database error during registration' });
         }
 
         // Fetch the newly inserted user
@@ -616,9 +582,8 @@ app.post('/google-signin', (req, res) => {
 
           const newUser = results[0];
           const token = jwt.sign(
-            { id: newUser.id, email: newUser.email, google_id: newUser.google_id },
-            process.env.JWT_SECRET, // Ensure you use process.env.JWT_SECRET
-            
+            { id: newUser.id, google_id: newUser.google_id },
+            process.env.JWT_SECRET
           );
 
           return res.status(201).json({
@@ -626,7 +591,6 @@ app.post('/google-signin', (req, res) => {
             token,
             user: {
               id: newUser.id,
-              email: newUser.email,
               google_id: newUser.google_id,
               name: newUser.name,
               picture: newUser.picture,
@@ -641,79 +605,54 @@ app.post('/google-signin', (req, res) => {
 
 
 
-// Facebook Sign-In route
-app.post('/facebook-signin', async (req, res) => {
-  const { facebookId, email, name, picture } = req.body;
+app.post('/facebook-signin', (req, res) => {
+  const { facebookId, name, picture } = req.body;
 
-  try {
-    // Check if the user already exists in the database
-    const checkSql = 'SELECT * FROM users WHERE facebook_id = ?';
-    connection.query(checkSql, [facebookId], (err, results) => {
-      if (err) {
-        console.error('Database error during Facebook ID check:', err);
-        return res.status(500).json({ error: 'Database error during Facebook ID check' });
-      }
-
-      if (results.length > 0) {
-        // User exists, update their information
-        const user = results[0];
-        const updateSql = 'UPDATE users SET name = ?, email = ?, picture = ? WHERE facebook_id = ?';
-        connection.query(updateSql, [name, email, picture, facebookId], (err) => {
-          if (err) {
-            console.error('Database error during Facebook update:', err);
-            return res.status(500).json({ error: 'Database error during Facebook update' });
-          }
-
-          const jwtToken = jwt.sign({ id: user.id }, process.env.JWT_SECRET);
-          console.log('User registered:', {jwtToken });
-          return res.json({
-            message: 'User information updated successfully',
-            token: jwtToken,
-            user: {
-              id: user.id,
-              facebook_id: facebookId,
-              name,
-              email,
-              picture,
-            },
-          });
-        });
-      } else {
-        // User doesn't exist, register them
-        const registerSql = 'INSERT INTO users (facebook_id, name, email, picture) VALUES (?, ?, ?, ?)';
-        connection.query(registerSql, [facebookId, name, email, picture], (err, result) => {
-          if (err) {
-            if (err.code === 'ER_DUP_ENTRY') {
-              console.error('Duplicate entry error:', err);
-              return res.status(409).json({ error: 'Email already registered' });
-            } else {
-              console.error('Database error during user insertion:', err);
-              return res.status(500).json({ error: 'Database error during registration' });
-            }
-          }
-
-          const userId = result.insertId;
-          const jwtToken = jwt.sign({ id: userId }, process.env.JWT_SECRET);
-          console.log('User registered:', {jwtToken });
-          return res.status(201).json({
-            message: 'User registered and authenticated successfully',
-            token: jwtToken,
-            user: {
-              id: userId,
-              facebook_id: facebookId,
-              name,
-              email,
-              picture,
-            },
-          });
-        });
-      }
-    });
-  } catch (error) {
-    console.error('Facebook authentication error:', error);
-    res.status(401).json({ error: 'Invalid Facebook token' });
+  // Validate the input
+  if (!facebookId || !name || !picture) {
+    return res.status(400).json({ error: 'Missing required fields' });
   }
+
+  console.log('Received data from client:', { facebookId, name, picture });
+
+  // Check if the user already exists in the database based on facebookId
+  const checkSql = 'SELECT * FROM users WHERE facebook_id = ?';
+  connection.query(checkSql, [facebookId], (err, results) => {
+    if (err) {
+      console.error('Database error during Facebook ID check:', err);
+      return res.status(500).json({ error: 'Database error during Facebook ID check' });
+    }
+
+    if (results.length > 0) {
+      // User already exists
+      return res.status(409).json({ error: 'User already registered' });
+    } else {
+      // User does not exist, insert new user
+      const registerSql = 'INSERT INTO users (facebook_id, name, picture) VALUES (?, ?, ?)';
+      connection.query(registerSql, [facebookId, name, picture], (err, result) => {
+        if (err) {
+          console.error('Database error during user insertion:', err);
+          return res.status(500).json({ error: 'Database error during registration' });
+        }
+
+        const userId = result.insertId;
+        const jwtToken = jwt.sign({ id: userId }, process.env.JWT_SECRET);
+        console.log('User registered:', { jwtToken });
+        return res.status(201).json({
+          message: 'User registered and authenticated successfully',
+          token: jwtToken,
+          user: {
+            id: userId,
+            facebook_id: facebookId,
+            name,
+            picture,
+          },
+        });
+      });
+    }
+  });
 });
+
 
 
 
