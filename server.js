@@ -113,7 +113,7 @@ function sendResetOTPEmail(email, OTP, callback) {
 app.post('/register/email', (req, res) => {
   const { email } = req.body;
 
-  const checkSql = 'SELECT * FROM users WHERE email = ?';
+  const checkSql = 'SELECT * FROM users WHERE email = ? AND password IS NULL';
   connection.query(checkSql, [email], (err, results) => {
       if (err) {
           console.error('Database error during email check:', err);
@@ -230,7 +230,7 @@ app.post('/register/set-password', (req, res) => {
 });
 
 
-app.post('/resend-otp', (req, res) => {
+app.post('/resend-otp/register', (req, res) => {
   const { email } = req.body;
 
   const findOtpSql = 'SELECT otp, expires_at FROM otps WHERE email = ?';
@@ -285,7 +285,7 @@ app.post('/forgot-password', (req, res) => {
   const { email } = req.body;
 
   // Check if the email exists
-  const userCheckSql = 'SELECT * FROM users WHERE email = ?';
+  const userCheckSql = 'SELECT * FROM users WHERE email = ? AND password IS NOT NULL';
   connection.query(userCheckSql, [email], (err, userResults) => {
       if (err) {
           console.error('Database error during email check:', err);
@@ -407,7 +407,7 @@ app.post('/reset-password', (req, res) => {
 
 
 
-app.post('/resent-otp', (req, res) => {
+app.post('/resent-otp/reset-password', (req, res) => {
   const { email } = req.body;
 
   // Check if the email exists
@@ -638,6 +638,99 @@ app.post('/google-signin', (req, res) => {
       });
     }
   });
+});
+
+//interaction
+app.post('/interactions', (req, res) => {
+  const { user_id, post_id, action_type } = req.body;
+
+  if (!user_id || !post_id || !action_type) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+
+  const query = `
+    INSERT INTO user_interactions (user_id, post_id, action_type)
+    VALUES (?, ?, ?)
+  `;
+
+  const values = [user_id, post_id, action_type];
+
+  connection.query(query, values, (err, results) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.status(201).json({ message: 'Interaction recorded successfully', interaction_id: results.insertId });
+  });
+});
+
+
+// View All Posts
+app.get('/posts', (req, res) => {
+  connection.query('SELECT * FROM posts', (err, results) => {
+    if (err) return res.status(500).json({ error: err.message });
+    res.json(results);
+  });
+});
+
+// View a Single Post
+app.get('/posts/:id', (req, res) => {
+  const { id } = req.params;
+  connection.query('SELECT * FROM posts WHERE post_id = ?', [id], (err, results) => {
+    if (err) return res.status(500).json({ error: err.message });
+    if (results.length === 0) return res.status(404).json({ error: 'Post not found' });
+    res.json(results[0]);
+  });
+});
+
+// Create a Post
+app.post('/posts', (req, res) => {
+  const { user_id, content, video_url, photo_url } = req.body;
+  connection.query(
+    'INSERT INTO posts (user_id, content, video_url, photo_url) VALUES (?, ?, ?, ?)',
+    [user_id, content, video_url, photo_url],
+    (err, results) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.status(201).json({
+        post_id: results.insertId,
+        user_id,
+        content,
+        video_url,
+        photo_url
+      });
+    }
+  );
+});
+
+// Update a Post
+app.put('/posts/:id', (req, res) => {
+  const { id } = req.params;
+  const { content, video_url, photo_url } = req.body;
+  connection.query(
+    'UPDATE posts SET content = ?, video_url = ?, photo_url = ?, updated_at = NOW() WHERE post_id = ?',
+    [content, video_url, photo_url, id],
+    (err, results) => {
+      if (err) return res.status(500).json({ error: err.message });
+      if (results.affectedRows === 0) return res.status(404).json({ error: 'Post not found' });
+      res.json({
+        post_id: id,
+        content,
+        video_url,
+        photo_url
+      });
+    }
+  );
+});
+
+// Delete a Post
+app.delete('/posts/:id', (req, res) => {
+  const { id } = req.params;
+  connection.query(
+    'DELETE FROM posts WHERE post_id = ?',
+    [id],
+    (err, results) => {
+      if (err) return res.status(500).json({ error: err.message });
+      if (results.affectedRows === 0) return res.status(404).json({ error: 'Post not found' });
+      res.json({ message: 'Post deleted successfully' });
+    }
+  );
 });
 
 
