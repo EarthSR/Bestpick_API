@@ -54,7 +54,7 @@ connection.connect(err => {
 // Generate OTP
 function generateOtp() {
   const otp = crypto.randomBytes(3).toString('hex'); // 3 bytes = 6 hex characters
-  return parseInt(otp, 16).toString().slice(0, 4); // Convert to an integer and then take the first 6 digits
+  return parseInt(otp, 16).toString().slice(0, 4); 
 }
 
 // Send OTP to the user's email
@@ -113,62 +113,78 @@ function sendResetOTPEmail(email, OTP, callback) {
 app.post('/register/email', (req, res) => {
   const { email } = req.body;
 
-  const checkSql = 'SELECT * FROM users WHERE email = ? AND password IS NULL';
-  connection.query(checkSql, [email], (err, results) => {
+  // Step 1: Check if the email is already registered with a password
+  const checkRegisteredSql = 'SELECT * FROM users WHERE email = ? AND password IS NOT NULL';
+  connection.query(checkRegisteredSql, [email], (err, results) => {
       if (err) {
-          console.error('Database error during email check:', err);
+          console.error('Database error during email registration check:', err);
           return res.status(500).json({ error: 'Internal server error' });
       }
       if (results.length > 0) {
-          return res.status(400).json({ error: 'Email already in use or used in another sign-in' });
+          return res.status(400).json({ error: 'Email already registered' });
       }
 
-      const otp = generateOtp(); // Implement this function to generate a random OTP
-      const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes from now
-
-      const findOtpSql = 'SELECT * FROM otps WHERE email = ?';
-      connection.query(findOtpSql, [email], (err, otpResults) => {
+      // Step 2: Check if the email is already in use for an unregistered account (no password set)
+      const checkSql = 'SELECT * FROM users WHERE email = ? AND password IS NULL';
+      connection.query(checkSql, [email], (err, results) => {
           if (err) {
-              console.error('Database error during OTP retrieval:', err);
+              console.error('Database error during email check:', err);
               return res.status(500).json({ error: 'Internal server error' });
           }
-
-          if (otpResults.length > 0) {
-              // Update existing OTP
-              const updateOtpSql = 'UPDATE otps SET otp = ?, expires_at = ? WHERE email = ?';
-              connection.query(updateOtpSql, [otp, expiresAt, email], (err, updateResult) => {
-                  if (err) {
-                      console.error('Database error during OTP update:', err);
-                      return res.status(500).json({ error: 'Internal server error' });
-                  }
-                  sendOtpEmail(email, otp, (error, info) => {
-                      if (error) {
-                          console.error('Error sending OTP email:', error);
-                          return res.status(500).json({ error: 'Error sending OTP email' });
-                      }
-                      res.status(200).json({ message: 'OTP sent to email' });
-                  });
-              });
-          } else {
-              // Insert new OTP
-              const insertOtpSql = 'INSERT INTO otps (email, otp, expires_at) VALUES (?, ?, ?)';
-              connection.query(insertOtpSql, [email, otp, expiresAt], (err, insertResult) => {
-                  if (err) {
-                      console.error('Database error during OTP insertion:', err);
-                      return res.status(500).json({ error: 'Internal server error' });
-                  }
-                  sendOtpEmail(email, otp, (error, info) => {
-                      if (error) {
-                          console.error('Error sending OTP email:', error);
-                          return res.status(500).json({ error: 'Error sending OTP email' });
-                      }
-                      res.status(200).json({ message: 'OTP sent to email' });
-                  });
-              });
+          if (results.length > 0) {
+              return res.status(400).json({ error: 'Email already in use or used in another sign-in' });
           }
+
+          // Step 3: Generate OTP and expiration time
+          const otp = generateOtp(); // Implement this function to generate a random OTP
+          const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes from now
+
+          // Step 4: Check if an OTP already exists for the email
+          const findOtpSql = 'SELECT * FROM otps WHERE email = ?';
+          connection.query(findOtpSql, [email], (err, otpResults) => {
+              if (err) {
+                  console.error('Database error during OTP retrieval:', err);
+                  return res.status(500).json({ error: 'Internal server error' });
+              }
+
+              if (otpResults.length > 0) {
+                  // Update existing OTP
+                  const updateOtpSql = 'UPDATE otps SET otp = ?, expires_at = ? WHERE email = ?';
+                  connection.query(updateOtpSql, [otp, expiresAt, email], (err, updateResult) => {
+                      if (err) {
+                          console.error('Database error during OTP update:', err);
+                          return res.status(500).json({ error: 'Internal server error' });
+                      }
+                      sendOtpEmail(email, otp, (error, info) => {
+                          if (error) {
+                              console.error('Error sending OTP email:', error);
+                              return res.status(500).json({ error: 'Error sending OTP email' });
+                          }
+                          res.status(200).json({ message: 'OTP sent to email' });
+                      });
+                  });
+              } else {
+                  // Insert new OTP
+                  const insertOtpSql = 'INSERT INTO otps (email, otp, expires_at) VALUES (?, ?, ?)';
+                  connection.query(insertOtpSql, [email, otp, expiresAt], (err, insertResult) => {
+                      if (err) {
+                          console.error('Database error during OTP insertion:', err);
+                          return res.status(500).json({ error: 'Internal server error' });
+                      }
+                      sendOtpEmail(email, otp, (error, info) => {
+                          if (error) {
+                              console.error('Error sending OTP email:', error);
+                              return res.status(500).json({ error: 'Error sending OTP email' });
+                          }
+                          res.status(200).json({ message: 'OTP sent to email' });
+                      });
+                  });
+              }
+          });
       });
   });
 });
+
 
 
 
@@ -732,12 +748,6 @@ app.delete('/posts/:id', (req, res) => {
     }
   );
 });
-
-
-
-
-
-
 
 
 // Start the server
