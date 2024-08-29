@@ -570,22 +570,22 @@ app.post('/google-signin', (req, res) => {
   console.log('Received data from client:', { googleId, email, name, picture });
 
   // Check if the user already exists in the database based on googleId
-  const checkSql = 'SELECT * FROM users WHERE google_id = ?';
-  connection.query(checkSql, [googleId], (err, results) => {
+  const checkGoogleIdSql = 'SELECT * FROM users WHERE google_id = ?';
+  connection.query(checkGoogleIdSql, [googleId], (err, googleIdResults) => {
     if (err) {
       console.error('Database error during Google ID check:', err);
       return res.status(500).json({ error: 'Database error during check' });
     }
 
-    if (results.length > 0) {
+    if (googleIdResults.length > 0) {
       // User exists, update their information
-      const user = results[0];
+      const user = googleIdResults[0];
       const updateSql = `
         UPDATE users 
-        SET email = ?, name = ? 
+        SET email = ?, name = ?, picture = ? 
         WHERE google_id = ?
       `;
-      connection.query(updateSql, [email, name, googleId], (err) => {
+      connection.query(updateSql, [email, name, picture, googleId], (err) => {
         if (err) {
           console.error('Database error during user update:', err);
           return res.status(500).json({ error: 'Database error during update' });
@@ -593,8 +593,7 @@ app.post('/google-signin', (req, res) => {
 
         const token = jwt.sign(
           { id: user.id, email: user.email, google_id: user.google_id },
-          process.env.JWT_SECRET, // Ensure you use process.env.JWT_SECRET
-          
+          process.env.JWT_SECRET
         );
         console.log('User updated:', { token, googleId, email, name, picture });
         return res.json({
@@ -610,51 +609,60 @@ app.post('/google-signin', (req, res) => {
         });
       });
     } else {
-      // User does not exist, insert new user
-      const insertSql = 'INSERT INTO users (google_id, email, name, picture) VALUES (?, ?, ?, ?)';
-      connection.query(insertSql, [googleId, email, name, picture], (err, result) => {
+      // Check if the email is already associated with another account
+      const checkEmailSql = 'SELECT * FROM users WHERE email = ?';
+      connection.query(checkEmailSql, [email], (err, emailResults) => {
         if (err) {
-          if (err.code === 'ER_DUP_ENTRY') {
-            console.error('Duplicate entry error:', err);
-            return res.status(409).json({ error: 'Email already registered' });
-          } else {
-            console.error('Database error during user insertion:', err);
-            return res.status(500).json({ error: 'Database error during registration' });
-          }
+          console.error('Database error during email check:', err);
+          return res.status(500).json({ error: 'Database error during check' });
         }
 
-        // Fetch the newly inserted user
-        const newUserId = result.insertId;
-        const newUserSql = 'SELECT * FROM users WHERE id = ?';
-        connection.query(newUserSql, [newUserId], (err, results) => {
-          if (err) {
-            console.error('Database error during new user fetch:', err);
-            return res.status(500).json({ error: 'Database error during new user fetch' });
-          }
+        if (emailResults.length > 0) {
+          // Email already in use by another account
+          return res.status(409).json({ error: 'Email already registered with another account' });
+        } else {
+          // Insert new user
+          const insertSql = 'INSERT INTO users (google_id, email, name, picture) VALUES (?, ?, ?, ?)';
+          connection.query(insertSql, [googleId, email, name, picture], (err, result) => {
+            if (err) {
+              console.error('Database error during user insertion:', err);
+              return res.status(500).json({ error: 'Database error during registration' });
+            }
 
-          const newUser = results[0];
-          const token = jwt.sign(
-            { id: newUser.id, email: newUser.email, google_id: newUser.google_id },
-            process.env.JWT_SECRET, // Ensure you use process.env.JWT_SECRET
-            
-          );
+            // Fetch the newly inserted user
+            const newUserId = result.insertId;
+            const newUserSql = 'SELECT * FROM users WHERE id = ?';
+            connection.query(newUserSql, [newUserId], (err, newUserResults) => {
+              if (err) {
+                console.error('Database error during new user fetch:', err);
+                return res.status(500).json({ error: 'Database error during new user fetch' });
+              }
 
-          return res.status(201).json({
-            message: 'User registered and authenticated successfully',
-            token,
-            user: {
-              id: newUser.id,
-              email: newUser.email,
-              google_id: newUser.google_id,
-              name: newUser.name,
-              picture: newUser.picture,
-            },
+              const newUser = newUserResults[0];
+              const token = jwt.sign(
+                { id: newUser.id, email: newUser.email, google_id: newUser.google_id },
+                process.env.JWT_SECRET
+              );
+
+              return res.status(201).json({
+                message: 'User registered and authenticated successfully',
+                token,
+                user: {
+                  id: newUser.id,
+                  email: newUser.email,
+                  google_id: newUser.google_id,
+                  name: newUser.name,
+                  picture: newUser.picture,
+                },
+              });
+            });
           });
-        });
+        }
       });
     }
   });
 });
+
 
 //interaction
 app.post('/interactions', (req, res) => {
