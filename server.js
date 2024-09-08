@@ -53,7 +53,6 @@ function generateOtp() {
   return parseInt(otp, 16).toString().slice(0, 4); 
 }
 
-// Send OTP to the user's email
 function sendOtpEmail(email, otp, callback) {
   const transporter = nodemailer.createTransport({
     service: 'Gmail',
@@ -67,16 +66,32 @@ function sendOtpEmail(email, otp, callback) {
     from: process.env.email,
     to: email,
     subject: 'Your OTP Code',
-    text: `Your OTP code is ${otp}`
+    html: `
+      <div style="font-family: Arial, sans-serif; color: #333;">
+        <h2 style="color: #007bff;">Your OTP Code</h2>
+        <p>Hello,</p>
+        <p>We received a request to verify your email address. Please use the OTP code below to complete the process:</p>
+        <div style="padding: 10px; border: 2px solid #007bff; display: inline-block; font-size: 24px; color: #007bff; font-weight: bold;">
+          ${otp}
+        </div>
+        <p>This code will expire in 10 minutes.</p>
+        <p>If you didn’t request this, please ignore this email.</p>
+        <p style="margin-top: 20px;">Thanks, <br> The Team</p>
+        <hr>
+        <p style="font-size: 12px; color: #999;">This is an automated email, please do not reply.</p>
+      </div>
+    `
   };
 
   transporter.sendMail(mailOptions, (error, info) => {
     if (error) {
-      return callback(error);
+      console.error('Error sending OTP email:', error); // Log the error for debugging purposes
+      return callback({ error: 'Failed to send OTP email. Please try again later.' });
     }
-    callback(null, info);
+    callback(null, info); // Proceed if the email was successfully sent
   });
 }
+
 
 // Register a new email user
 app.post('/register/email', async (req, res) => {
