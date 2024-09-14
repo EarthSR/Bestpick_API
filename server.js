@@ -430,13 +430,12 @@ app.post('/login', async (req, res) => {
 
 
 
-
 // Google Sign-In
 app.post('/google-signin', async (req, res) => {
   try {
-    const { googleId, email, name, picture } = req.body;
+    const { googleId, email } = req.body;
 
-    if (!googleId || !email || !name || !picture) {
+    if (!googleId || !email) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
@@ -446,8 +445,8 @@ app.post('/google-signin', async (req, res) => {
 
       if (googleIdResults.length > 0) {
         const user = googleIdResults[0];
-        const updateSql = 'UPDATE users SET email = ?, name = ?, picture = ? WHERE google_id = ?';
-        connection.query(updateSql, [email, name, picture, googleId], (err) => {
+        const updateSql = 'UPDATE users SET email = ? WHERE google_id = ?';
+        connection.query(updateSql, [email, googleId], (err) => {
           if (err) throw new Error('Database error during user update');
 
           const token = jwt.sign({ id: user.id, email: user.email, google_id: user.google_id }, JWT_SECRET);
@@ -458,8 +457,6 @@ app.post('/google-signin', async (req, res) => {
               id: user.id,
               email: user.email,
               google_id: user.google_id,
-              name: user.name,
-              picture: user.picture,
             },
           });
         });
@@ -469,8 +466,8 @@ app.post('/google-signin', async (req, res) => {
           if (err) throw new Error('Database error during email check');
           if (emailResults.length > 0) return res.status(409).json({ error: 'Email already registered with another account' });
 
-          const insertSql = 'INSERT INTO users (google_id, email, name, picture) VALUES (?, ?, ?, ?)';
-          connection.query(insertSql, [googleId, email, name, picture], (err, result) => {
+          const insertSql = 'INSERT INTO users (google_id, email) VALUES (?, ?)';
+          connection.query(insertSql, [googleId, email], (err, result) => {
             if (err) throw new Error('Database error during user insertion');
 
             const newUserId = result.insertId;
@@ -488,8 +485,6 @@ app.post('/google-signin', async (req, res) => {
                   id: newUser.id,
                   email: newUser.email,
                   google_id: newUser.google_id,
-                  name: newUser.name,
-                  picture: newUser.picture,
                 },
               });
             });
@@ -502,6 +497,7 @@ app.post('/google-signin', async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
 
 // Record User Interaction (Like, Comment, etc.)
 app.post('/interactions', async (req, res) => {
