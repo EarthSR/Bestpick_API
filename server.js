@@ -532,24 +532,47 @@ function isValidJson(str) {
   }
 }
 
-
-//view all posts
 app.get('/posts', (req, res) => {
   try {
-    connection.query('SELECT * FROM posts', (err, results) => {
+    const baseUrl = ''; // Update with your server's base URL if needed
+
+    // SQL query to join posts with users
+    const query = `
+      SELECT posts.*, users.username, users.picture 
+      FROM posts 
+      JOIN users ON posts.user_id = users.id
+    `;
+
+    connection.query(query, (err, results) => {
       if (err) {
         console.error('Database error during posts retrieval:', err);
         return res.status(500).json({ error: 'Internal server error during posts retrieval' });
       }
 
-      // Parse JSON fields for each post or wrap them in an array if they're plain strings
+      // Process each post
       const parsedResults = results.map(post => {
+        // Log the raw values for debugging
+        console.log('Raw photo_url:', post.photo_url);
+        console.log('Raw video_url:', post.video_url);
+
+        // Directly use the photo_url and video_url as arrays
+        const photoUrls = Array.isArray(post.photo_url) ? post.photo_url.map(photo => baseUrl + photo) : [];
+        const videoUrls = Array.isArray(post.video_url) ? post.video_url.map(video => baseUrl + video) : [];
+
         return {
-          ...post,
-          photo_url: isValidJson(post.photo_url) ? JSON.parse(post.photo_url) : [post.photo_url],
-          video_url: isValidJson(post.video_url) ? JSON.parse(post.video_url) : [post.video_url]
+          id: post.id,
+          content: post.content,
+          time: post.time,
+          updated: post.updated_at,
+          photo_url: photoUrls,
+          video_url: videoUrls,
+          userName: post.username, // From users table
+          userProfileUrl: post.picture ? baseUrl + post.picture : null // Concatenate with base URL if picture exists
         };
       });
+
+      // Log the parsed results for debugging
+      console.log('Parsed Results:', parsedResults);
 
       res.json(parsedResults);
     });
@@ -558,6 +581,9 @@ app.get('/posts', (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+
+
 
 
 
