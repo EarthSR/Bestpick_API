@@ -9,7 +9,9 @@ const axios = require('axios');
 const fs = require('fs');
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
+const multer = require('multer');
 require('dotenv').config();
+const path = require('path');
 const JWT_SECRET = process.env.JWT_SECRET;
 const app = express();
 
@@ -521,134 +523,229 @@ app.post('/interactions', async (req, res) => {
   }
 });
 
-// View All Posts
-app.get('/posts', async (req, res) => {
+function isValidJson(str) {
+  try {
+    JSON.parse(str);
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+
+//view all posts
+app.get('/posts', (req, res) => {
   try {
     connection.query('SELECT * FROM posts', (err, results) => {
-      if (err) throw new Error('Database error during posts retrieval');
-      res.json(results);
+      if (err) {
+        console.error('Database error during posts retrieval:', err);
+        return res.status(500).json({ error: 'Internal server error during posts retrieval' });
+      }
+
+      // Parse JSON fields for each post or wrap them in an array if they're plain strings
+      const parsedResults = results.map(post => {
+        return {
+          ...post,
+          photo_url: isValidJson(post.photo_url) ? JSON.parse(post.photo_url) : [post.photo_url],
+          video_url: isValidJson(post.video_url) ? JSON.parse(post.video_url) : [post.video_url]
+        };
+      });
+
+      res.json(parsedResults);
     });
   } catch (error) {
-    console.error(error.message);
+    console.error('Internal server error:', error.message);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+
 
 // View a Single Post
-app.get('/posts/:id', async (req, res) => {
+app.get('/posts/:id', (req, res) => {
   try {
     const { id } = req.params;
-    connection.query('SELECT * FROM posts WHERE post_id = ?', [id], (err, results) => {
-      if (err) throw new Error('Database error during post retrieval');
-      if (results.length === 0) return res.status(404).json({ error: 'Post not found' });
-      res.json(results[0]);
+    connection.query('SELECT * FROM posts WHERE id = ?', [id], (err, results) => {
+      if (err) {
+        console.error('Database error during post retrieval:', err);
+        return res.status(500).json({ error: 'Internal server error during post retrieval' });
+      }
+      if (results.length === 0) {
+        return res.status(404).json({ error: 'Post not found' });
+      }
+
+      // Parse JSON fields for the post or wrap them in an array if they're plain strings
+      const post = results[0];
+      post.photo_url = isValidJson(post.photo_url) ? JSON.parse(post.photo_url) : [post.photo_url];
+      post.video_url = isValidJson(post.video_url) ? JSON.parse(post.video_url) : [post.video_url];
+
+      res.json(post);
     });
   } catch (error) {
-    console.error(error.message);
+    console.error('Internal server error:', error.message);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 
 
+
+// Set up multer for file uploads
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = 'uploads/';
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir);
+    }
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    cb(null, `${Date.now()}_${file.originalname}`);
+  }
+});
+
+const upload = multer({ storage });
+
+// Verify Token Middleware
 const verifyToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
-
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return res.status(403).json({ error: 'No token provided or incorrect format' });
   }
 
-  // Extract the token after "Bearer "
   const token = authHeader.split(' ')[1];
-
   try {
-    const decoded = jwt.verify(token, JWT_SECRET); // Use your JWT secret
-    req.userId = decoded.id; // Extract the user ID from the token and attach it to the request
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.userId = decoded.id;
     next();
   } catch (err) {
     return res.status(401).json({ error: 'Unauthorized: Invalid token' });
   }
 };
-
-
-
-
 // Create a Post
-app.post('/posts', verifyToken, async (req, res) => {
+app.post('/posts/create', verifyToken, upload.fields([{ name: 'photo', maxCount: 10 }, { name: 'video', maxCount: 10 }]), (req, res) => {
   try {
-    const { user_id, content, video_url, photo_url } = req.body;
+    const { user_id, content } = req.body;
+    let photo_urls = [];
+    let video_urls = [];
 
     // Ensure the user is creating a post for their own account
-    if (req.userId !== user_id) {
+    if (parseInt(req.userId) !== parseInt(user_id)) {
       return res.status(403).json({ error: 'You are not authorized to create a post for this user' });
     }
 
+    // Get uploaded photo URLs
+    if (req.files['photo']) {
+      photo_urls = req.files['photo'].map(file => `/uploads/${file.filename}`);
+    }
+
+    // Get uploaded video URLs
+    if (req.files['video']) {
+      video_urls = req.files['video'].map(file => `/uploads/${file.filename}`);
+    }
+
+    // Convert arrays to JSON strings for storage
+    const photo_urls_json = JSON.stringify(photo_urls);
+    const video_urls_json = JSON.stringify(video_urls);
+
     const query = 'INSERT INTO posts (user_id, content, video_url, photo_url) VALUES (?, ?, ?, ?)';
-    connection.query(query, [user_id, content, video_url, photo_url], (err, results) => {
-      if (err) throw new Error('Database error during post creation');
+    connection.query(query, [user_id, content, video_urls_json, photo_urls_json], (err, results) => {
+      if (err) {
+        console.error('Database error during post creation:', err);
+        return res.status(500).json({ error: 'Database error during post creation' });
+      }
       res.status(201).json({
         post_id: results.insertId,
         user_id,
         content,
-        video_url,
-        photo_url
+        video_urls: video_urls,
+        photo_urls: photo_urls
       });
     });
   } catch (error) {
-    console.error(error.message);
+    console.error('Internal server error:', error.message);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 // Update a Post
-app.put('/posts/:id', verifyToken, async (req, res) => {
+app.put('/posts/:id', verifyToken, upload.fields([{ name: 'photo', maxCount: 10 }, { name: 'video', maxCount: 10 }]), (req, res) => {
   try {
     const { id } = req.params;
-    const { content, video_url, photo_url, user_id } = req.body;
+    const { content, user_id } = req.body;
+    let photo_urls = [];
+    let video_urls = [];
 
     // Ensure the user is updating their own post
-    if (req.userId !== user_id) {
+    if (parseInt(req.userId) !== parseInt(user_id)) {
       return res.status(403).json({ error: 'You are not authorized to update this post' });
     }
 
+    // Get uploaded photo URLs
+    if (req.files['photo']) {
+      photo_urls = req.files['photo'].map(file => `/uploads/${file.filename}`);
+    }
+
+    // Get uploaded video URLs
+    if (req.files['video']) {
+      video_urls = req.files['video'].map(file => `/uploads/${file.filename}`);
+    }
+
+    // Convert arrays to JSON strings for storage
+    const photo_urls_json = JSON.stringify(photo_urls);
+    const video_urls_json = JSON.stringify(video_urls);
+
     const query = 'UPDATE posts SET content = ?, video_url = ?, photo_url = ?, updated_at = NOW() WHERE post_id = ? AND user_id = ?';
-    connection.query(query, [content, video_url, photo_url, id, user_id], (err, results) => {
-      if (err) throw new Error('Database error during post update');
-      if (results.affectedRows === 0) return res.status(404).json({ error: 'Post not found or you are not the owner' });
+    connection.query(query, [content, video_urls_json, photo_urls_json, id, user_id], (err, results) => {
+      if (err) {
+        console.error('Database error during post update:', err);
+        return res.status(500).json({ error: 'Database error during post update' });
+      }
+      if (results.affectedRows === 0) {
+        return res.status(404).json({ error: 'Post not found or you are not the owner' });
+      }
       res.json({
         post_id: id,
         content,
-        video_url,
-        photo_url
+        video_urls: video_urls,
+        photo_urls: photo_urls
       });
     });
   } catch (error) {
-    console.error(error.message);
+    console.error('Internal server error:', error.message);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
+
 // Delete a Post
-app.delete('/posts/:id', verifyToken, async (req, res) => {
+app.delete('/posts/:id', verifyToken, (req, res) => {
   try {
     const { id } = req.params;
     const { user_id } = req.body;
 
-    // Ensure the user is deleting their own post
-    if (req.userId !== user_id) {
+    if (parseInt(req.userId) !== parseInt(user_id)) {
       return res.status(403).json({ error: 'You are not authorized to delete this post' });
     }
 
     connection.query('DELETE FROM posts WHERE post_id = ? AND user_id = ?', [id, user_id], (err, results) => {
-      if (err) throw new Error('Database error during post deletion');
-      if (results.affectedRows === 0) return res.status(404).json({ error: 'Post not found or you are not the owner' });
+      if (err) {
+        console.error('Database error during post deletion:', err);
+        return res.status(500).json({ error: 'Database error during post deletion' });
+      }
+      if (results.affectedRows === 0) {
+        return res.status(404).json({ error: 'Post not found or you are not the owner' });
+      }
       res.json({ message: 'Post deleted successfully' });
     });
   } catch (error) {
-    console.error(error.message);
+    console.error('Internal server error:', error.message);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+// Serve static files (uploaded images and videos)
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 
 // Start the server
