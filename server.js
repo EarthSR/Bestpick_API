@@ -451,7 +451,7 @@ app.post('/google-signin', async (req, res) => {
         connection.query(updateSql, [email, googleId], (err) => {
           if (err) throw new Error('Database error during user update');
 
-          const token = jwt.sign({ id: user.id, email: user.email, google_id: user.google_id }, JWT_SECRET);
+          const token = jwt.sign({ id: user.id}, JWT_SECRET);
           return res.json({
             message: 'User information updated successfully',
             token,
@@ -478,7 +478,7 @@ app.post('/google-signin', async (req, res) => {
               if (err) throw new Error('Database error during new user fetch');
 
               const newUser = newUserResults[0];
-              const token = jwt.sign({ id: newUser.id, email: newUser.email, google_id: newUser.google_id }, JWT_SECRET);
+              const token = jwt.sign({ id: newUser.id}, JWT_SECRET);
 
               return res.status(201).json({
                 message: 'User registered and authenticated successfully',
@@ -635,6 +635,7 @@ const upload = multer({ storage });
 // Verify Token Middleware
 const verifyToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
+  
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return res.status(403).json({ error: 'No token provided or incorrect format' });
   }
@@ -642,12 +643,13 @@ const verifyToken = (req, res, next) => {
   const token = authHeader.split(' ')[1];
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
-    req.userId = decoded.id;
-    next();
+    req.userId = decoded.id; // Store the user ID for later use
+    next(); // Proceed to the next middleware or route handler
   } catch (err) {
     return res.status(401).json({ error: 'Unauthorized: Invalid token' });
   }
 };
+
 // Create a Post
 app.post('/posts/create', verifyToken, upload.fields([{ name: 'photo', maxCount: 10 }, { name: 'video', maxCount: 10 }]), (req, res) => {
   try {
@@ -772,6 +774,56 @@ app.delete('/posts/:id', verifyToken, (req, res) => {
 
 // Serve static files (uploaded images and videos)
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+
+// API endpoint to get user profile data
+app.get('/api/users/:userId/profile', verifyToken, (req, res) => {
+  const userId = req.params.userId;
+
+  if (req.userId.toString() !== userId) {
+    return res.status(403).json({ error: 'You are not authorized to view this profile' });
+}
+
+  // SQL query to get user profile and count posts
+  const sql = `
+      SELECT 
+          u.id AS userId, 
+          u.username, 
+          u.picture AS profileImageUrl, 
+          u.follower_count, 
+          u.following_count, 
+          COUNT(p.id) AS post_count
+      FROM users u
+      LEFT JOIN posts p ON p.user_id = u.id
+      WHERE u.id = ?
+      GROUP BY u.id;
+  `;
+
+  connection.query(sql, [userId], (error, results) => {
+      if (error) {
+          return res.status(500).json({ error: 'Database error while fetching user profile' });
+      }
+      if (results.length === 0) {
+          return res.status(404).json({ error: 'User not found' });
+      }
+
+      const userProfile = results[0];
+
+      // Construct the response
+      const response = {
+          userId: userProfile.userId,
+          username: userProfile.username,
+          profileImageUrl: userProfile.profileImageUrl,
+          followerCount: userProfile.follower_count,
+          followingCount: userProfile.following_count,
+          postCount: userProfile.post_count
+      };
+
+      // Send the response
+      res.json(response);
+  });
+});
+
 
 
 // Start the server
