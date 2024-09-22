@@ -488,7 +488,7 @@ app.post('/google-signin', async (req, res) => {
                 user: {
                   id: newUser.id,
                   email: newUser.email,
-                  picture: user.picture,
+                  picture: newUser.picture,
                   google_id: newUser.google_id,
                 },
               });
@@ -788,7 +788,7 @@ app.post('/posts/like/:id', verifyToken, (req, res) => {
     }
 
     // Check if the post exists
-    const checkPostSql = 'SELECT * FROM posts WHERE post_id = ?';
+    const checkPostSql = 'SELECT * FROM posts WHERE id = ?';
     connection.query(checkPostSql, [id], (err, postResults) => {
       if (err) {
         console.error('Database error during post check:', err);
