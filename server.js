@@ -459,6 +459,7 @@ app.post('/google-signin', async (req, res) => {
             user: {
               id: user.id,
               email: user.email,
+              picture: user.picture,
               google_id: user.google_id,
             },
           });
@@ -487,6 +488,7 @@ app.post('/google-signin', async (req, res) => {
                 user: {
                   id: newUser.id,
                   email: newUser.email,
+                  picture: user.picture,
                   google_id: newUser.google_id,
                 },
               });
