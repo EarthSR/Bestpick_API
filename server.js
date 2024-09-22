@@ -360,7 +360,7 @@ app.post('/login', async (req, res) => {
     // Get the user's IP address (optional)
     const ipAddress = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
 
-    const sql = 'SELECT id, password, google_id, failed_attempts, last_failed_attempt FROM users WHERE email = ?';
+    const sql = 'SELECT id, password, google_id, failed_attempts, last_failed_attempt, picture FROM users WHERE email = ?';
     connection.query(sql, [email], (err, results) => {
       if (err) throw new Error('Database error during login');
       if (results.length === 0) {
@@ -417,6 +417,7 @@ app.post('/login', async (req, res) => {
             user: {
               id: user.id,
               email,
+              picture: user.picture,
               last_login: new Date(),
               last_login_ip: ipAddress
             }
@@ -772,6 +773,68 @@ app.delete('/posts/:id', verifyToken, (req, res) => {
   }
 });
 
+
+// Like or Unlike a Post
+app.post('/posts/like/:id', verifyToken, (req, res) => {
+  try {
+    const { id } = req.params;  // Post ID
+    const { user_id } = req.body; // User ID from request body
+
+    // Ensure the user is liking or unliking a post for their own account
+    if (parseInt(req.userId) !== parseInt(user_id)) {
+      return res.status(403).json({ error: 'You are not authorized to like this post' });
+    }
+
+    // Check if the post exists
+    const checkPostSql = 'SELECT * FROM posts WHERE post_id = ?';
+    connection.query(checkPostSql, [id], (err, postResults) => {
+      if (err) {
+        console.error('Database error during post check:', err);
+        return res.status(500).json({ error: 'Database error during post check' });
+      }
+      if (postResults.length === 0) {
+        return res.status(404).json({ error: 'Post not found' });
+      }
+
+      // Check if the user has already liked the post
+      const checkLikeSql = 'SELECT * FROM likes WHERE post_id = ? AND user_id = ?';
+      connection.query(checkLikeSql, [id, user_id], (err, likeResults) => {
+        if (err) {
+          console.error('Database error during like check:', err);
+          return res.status(500).json({ error: 'Database error during like check' });
+        }
+
+        if (likeResults.length > 0) {
+          // User already liked the post, so unlike (remove the like)
+          const unlikeSql = 'DELETE FROM likes WHERE post_id = ? AND user_id = ?';
+          connection.query(unlikeSql, [id, user_id], (err) => {
+            if (err) {
+              console.error('Database error during unlike:', err);
+              return res.status(500).json({ error: 'Database error during unlike' });
+            }
+            res.status(200).json({ message: 'Post unliked successfully' });
+          });
+        } else {
+          // User hasn't liked the post, so add a like
+          const likeSql = 'INSERT INTO likes (post_id, user_id) VALUES (?, ?)';
+          connection.query(likeSql, [id, user_id], (err) => {
+            if (err) {
+              console.error('Database error during like:', err);
+              return res.status(500).json({ error: 'Database error during like' });
+            }
+            res.status(201).json({ message: 'Post liked successfully' });
+          });
+        }
+      });
+    });
+  } catch (error) {
+    console.error('Internal server error:', error.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+
+
 // Serve static files (uploaded images and videos)
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
@@ -823,6 +886,10 @@ app.get('/api/users/:userId/profile', verifyToken, (req, res) => {
       res.json(response);
   });
 });
+
+
+
+
 
 
 
