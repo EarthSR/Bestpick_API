@@ -46,8 +46,24 @@ connection.connect(err => {
   console.log('Connected to the TiDB server.');
 });
 
-// In-memory store for failed login attempts
-const failedLoginAttempts = {};
+
+// Verify Token Middleware
+const verifyToken = (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return res.status(403).json({ error: 'No token provided or incorrect format' });
+  }
+
+  const token = authHeader.split(' ')[1];
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.userId = decoded.id; // Store the user ID for later use
+    next(); // Proceed to the next middleware or route handler
+  } catch (err) {
+    return res.status(401).json({ error: 'Unauthorized: Invalid token' });
+  }
+};
 
 // Generate OTP
 function generateOtp() {
@@ -360,7 +376,7 @@ app.post('/login', async (req, res) => {
     // Get the user's IP address (optional)
     const ipAddress = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
 
-    const sql = 'SELECT id, password, google_id, failed_attempts, last_failed_attempt, picture FROM users WHERE email = ?';
+    const sql = 'SELECT * FROM users WHERE email = ?';
     connection.query(sql, [email], (err, results) => {
       if (err) throw new Error('Database error during login');
       if (results.length === 0) {
@@ -374,10 +390,6 @@ app.post('/login', async (req, res) => {
         return res.status(400).json({ message: 'Please sign in using Google.' });
       }
 
-      // Check if the password is missing
-      if (user.password === null) {
-        return res.status(400).json({ message: 'Email is associated with another sign-in method.' });
-      }
 
       // If the user has exceeded failed login attempts, block them for 5 minutes
       if (user.failed_attempts >= 5 && user.last_failed_attempt) {
@@ -417,6 +429,7 @@ app.post('/login', async (req, res) => {
             user: {
               id: user.id,
               email,
+              username: user.username,
               picture: user.picture,
               last_login: new Date(),
               last_login_ip: ipAddress
@@ -430,6 +443,43 @@ app.post('/login', async (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+
+
+//set username
+app.post('/set-username', verifyToken, (req, res) => {
+  const { newUsername } = req.body;
+  const userId = req.userId; // Use the user ID extracted from the token
+
+  // Ensure that the new username is provided
+  if (!newUsername) {
+    return res.status(400).json({ message: 'New username is required' });
+  }
+
+  // Check if the username is already taken
+  const checkUsernameQuery = 'SELECT * FROM users WHERE username = ?';
+  connection.query(checkUsernameQuery, [newUsername], (err, results) => {
+    if (err) {
+      return res.status(500).json({ message: 'Database error checking username' });
+    }
+
+    if (results.length > 0) {
+      return res.status(400).json({ message: 'Username already taken' });
+    }
+
+    // Update the user's username
+    const updateUsernameQuery = 'UPDATE users SET username = ? WHERE id = ?';
+    connection.query(updateUsernameQuery, [newUsername, userId], (err) => {
+      if (err) {
+        return res.status(500).json({ message: 'Error updating username' });
+      }
+
+      return res.status(200).json({ message: 'Username set successfully' });
+    });
+  });
+});
+
+
 
 
 
@@ -460,6 +510,7 @@ app.post('/google-signin', async (req, res) => {
               id: user.id,
               email: user.email,
               picture: user.picture,
+              username: user.username,
               google_id: user.google_id,
             },
           });
@@ -470,7 +521,7 @@ app.post('/google-signin', async (req, res) => {
           if (err) throw new Error('Database error during email check');
           if (emailResults.length > 0) return res.status(409).json({ error: 'Email already registered with another account' });
 
-          const insertSql = 'INSERT INTO users (google_id, email) VALUES (?, ?)';
+          const insertSql = 'INSERT INTO users (google_id, email, username) VALUES (?, ?, "")';
           connection.query(insertSql, [googleId, email], (err, result) => {
             if (err) throw new Error('Database error during user insertion');
 
@@ -489,6 +540,7 @@ app.post('/google-signin', async (req, res) => {
                   id: newUser.id,
                   email: newUser.email,
                   picture: newUser.picture,
+                  username: newUser.username,
                   google_id: newUser.google_id,
                 },
               });
@@ -536,8 +588,7 @@ function isValidJson(str) {
 }
 
 app.get('/posts', (req, res) => {
-  try {
-    const baseUrl = ''; // Update with your server's base URL if needed
+  try { 
 
     // SQL query to join posts with users
     const query = `
@@ -559,8 +610,8 @@ app.get('/posts', (req, res) => {
         console.log('Raw video_url:', post.video_url);
 
         // Directly use the photo_url and video_url as arrays
-        const photoUrls = Array.isArray(post.photo_url) ? post.photo_url.map(photo => baseUrl + photo) : [];
-        const videoUrls = Array.isArray(post.video_url) ? post.video_url.map(video => baseUrl + video) : [];
+        const photoUrls = Array.isArray(post.photo_url) ? post.photo_url.map(photo => photo) : [];
+        const videoUrls = Array.isArray(post.video_url) ? post.video_url.map(video => video) : [];
 
         return {
           id: post.id,
@@ -570,7 +621,7 @@ app.get('/posts', (req, res) => {
           photo_url: photoUrls,
           video_url: videoUrls,
           userName: post.username, // From users table
-          userProfileUrl: post.picture ? baseUrl + post.picture : null // Concatenate with base URL if picture exists
+          userProfileUrl: post.picture ? post.picture : null // Concatenate with base URL if picture exists
         };
       });
 
@@ -635,23 +686,6 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage });
 
-// Verify Token Middleware
-const verifyToken = (req, res, next) => {
-  const authHeader = req.headers['authorization'];
-  
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return res.status(403).json({ error: 'No token provided or incorrect format' });
-  }
-
-  const token = authHeader.split(' ')[1];
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-    req.userId = decoded.id; // Store the user ID for later use
-    next(); // Proceed to the next middleware or route handler
-  } catch (err) {
-    return res.status(401).json({ error: 'Unauthorized: Invalid token' });
-  }
-};
 
 // Create a Post
 app.post('/posts/create', verifyToken, upload.fields([{ name: 'photo', maxCount: 10 }, { name: 'video', maxCount: 10 }]), (req, res) => {
