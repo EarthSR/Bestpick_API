@@ -886,12 +886,14 @@ app.get('/api/users/:userId/profile', verifyToken, (req, res) => {
   // SQL query to get user profile and count posts
   const sql = `
       SELECT 
-          u.id AS userId, 
-          u.username, 
-          u.picture AS profileImageUrl, 
-          u.follower_count, 
-          u.following_count, 
-          COUNT(p.id) AS post_count
+      u.id AS userId, 
+      u.username, 
+      u.picture AS profileImageUrl,
+      u.bio ,
+      u.gender, 
+      COUNT(p.id) AS post_count,
+      (SELECT COUNT(*) FROM follower_following WHERE following_id = u.id) AS follower_count, 
+      (SELECT COUNT(*) FROM follower_following WHERE follower_id = u.id) AS following_count   
       FROM users u
       LEFT JOIN posts p ON p.user_id = u.id
       WHERE u.id = ?
@@ -915,7 +917,9 @@ app.get('/api/users/:userId/profile', verifyToken, (req, res) => {
           profileImageUrl: userProfile.profileImageUrl,
           followerCount: userProfile.follower_count,
           followingCount: userProfile.following_count,
-          postCount: userProfile.post_count
+          postCount: userProfile.post_count,
+          gender: userProfile.gender,
+          bio:userProfile.bio
       };
 
       // Send the response
@@ -923,6 +927,77 @@ app.get('/api/users/:userId/profile', verifyToken, (req, res) => {
   });
 });
 
+
+
+// API endpoint to update user profile data with image
+app.put('/api/users/:userId/profile', verifyToken, upload.single('profileImage'), (req, res) => {
+  const userId = req.params.userId;
+
+  // Ensure that the user making the request is the same as the one being updated
+  if (req.userId.toString() !== userId) {
+    return res.status(403).json({ error: 'You are not authorized to update this profile' });
+  }
+
+  // Extract the data from the request body
+  const { username, bio, gender } = req.body;
+  const profileImage = req.file ? `/uploads/${req.file.filename}` : null; // Check if the image was uploaded
+
+  // Validate that the necessary fields are provided
+  if (!username || !bio || !gender) {
+    return res.status(400).json({ error: 'All fields are required: username, bio, and gender' });
+  }
+
+  // First, check if the username already exists for a different user
+  const checkUsernameSql = `
+    SELECT id FROM users WHERE username = ? AND id != ?;
+  `;
+
+  // Execute the SQL query to check for existing username
+  connection.query(checkUsernameSql, [username, userId], (error, results) => {
+    if (error) {
+      return res.status(500).json({ error: 'Database error while checking username' });
+    }
+
+    // If results length > 0, it means the username is already taken by another user
+    if (results.length > 0) {
+      return res.status(400).json({ error: 'Username already taken' });
+    }
+
+    // SQL query to update the user's profile
+    let updateProfileSql = `
+      UPDATE users 
+      SET username = ?, bio = ?, gender = ?
+    `;
+
+    const updateData = [username, bio, gender, userId];
+
+    // If an image was uploaded, include the profileImage in the update
+    if (profileImage) {
+      updateProfileSql += `, picture = ?`;
+      updateData.splice(3, 0, profileImage); // Insert profileImage into the query parameters
+    }
+
+    updateProfileSql += ` WHERE id = ?;`;
+
+    // Execute the SQL query to update the user's profile
+    connection.query(updateProfileSql, updateData, (error, results) => {
+      if (error) {
+        return res.status(500).json({ error: 'Database error while updating user profile' });
+      }
+
+      // If no rows were affected, the user was not found
+      if (results.affectedRows === 0) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      // Respond with a success message and the profile image URL if updated
+      res.json({
+        message: 'Profile updated successfully',
+        profileImage: profileImage ? profileImage : null
+      });
+    });
+  });
+});
 
 
 
