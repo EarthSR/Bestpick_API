@@ -875,6 +875,69 @@ app.post('/posts/like/:id', verifyToken, (req, res) => {
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 
+
+// Search API with grouped results by username
+app.get('/search', (req, res) => {
+  const { query } = req.query;
+
+  if (!query) {
+    return res.status(400).json({ error: 'Search query is required' });
+  }
+
+  // Trim the query to remove any leading/trailing spaces and convert it to lowercase
+  const searchValue = `%${query.trim().toLowerCase()}%`;
+
+  // SQL query to search posts by content or username (case-insensitive, partial matches)
+  const searchSql = `
+  SELECT 
+    u.username, 
+    LEFT(p.content, 100) AS content_preview  -- Show the first 100 characters as a preview
+  FROM users u
+  LEFT JOIN posts p ON p.user_id = u.id  -- Change to LEFT JOIN to include users with no posts
+  WHERE LOWER(u.username) LIKE LOWER(?) OR LOWER(p.content) LIKE LOWER(?)
+  ORDER BY p.updated_at DESC
+`;
+
+  console.log('Executing SQL query with value:', searchValue); // Log query for debugging
+
+  connection.query(searchSql, [searchValue, searchValue], (err, results) => {
+    if (err) {
+      console.error('Database error during search:', err);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+
+    if (results.length === 0) {
+      return res.status(404).json({ message: 'No results found' });
+    }
+
+    // Group the results by username and aggregate their posts
+    const groupedResults = results.reduce((acc, post) => {
+      const username = post.username;
+
+      // Check if the username already exists in the accumulator (grouped results)
+      const existingUser = acc.find(user => user.username === username);
+
+      if (existingUser) {
+        // If the username exists, add the content_preview to their posts array
+        existingUser.posts.push(post.content_preview);
+      } else {
+        // If the username does not exist, create a new entry for the user
+        acc.push({
+          username: post.username,
+          posts: [post.content_preview] // Initialize with the first post
+        });
+      }
+
+      return acc;
+    }, []); // Start with an empty array for grouping
+
+    res.json({ results: groupedResults });
+  });
+});
+
+
+
+
 // API endpoint to get user profile data
 app.get('/api/users/:userId/profile', verifyToken, (req, res) => {
   const userId = req.params.userId;
@@ -998,6 +1061,61 @@ app.put('/api/users/:userId/profile', verifyToken, upload.single('profileImage')
     });
   });
 });
+
+
+// API endpoint to follow or unfollow another user
+app.post('/api/users/:userId/follow/:followingId', verifyToken, (req, res) => {
+  const userId = req.params.userId;
+  const followingId = req.params.followingId;
+
+  // Ensure that the user making the request is the same as the one being followed or unfollowed
+  if (req.userId.toString() !== userId) {
+    return res.status(403).json({ error: 'You are not authorized to follow or unfollow this user' });
+  }
+
+  // Check if the following user exists
+  const checkFollowingSql = 'SELECT * FROM users WHERE id = ?';
+  connection.query(checkFollowingSql, [followingId], (error, followingResults) => {
+    if (error) {
+      return res.status(500).json({ error: 'Database error while checking following user' });
+    }
+    if (followingResults.length === 0) {
+      return res.status(404).json({ error: 'User to follow not found' });
+    }
+
+    // Check if the user is already following the other user
+    const checkFollowSql = 'SELECT * FROM follower_following WHERE follower_id = ? AND following_id = ?';
+    connection.query(checkFollowSql, [userId, followingId], (error, followResults) => {
+      if (error) {
+        return res.status(500).json({ error: 'Database error while checking follow status' });
+      }
+
+      if (followResults.length > 0) {
+        // User is already following, so unfollow
+        const unfollowSql = 'DELETE FROM follower_following WHERE follower_id = ? AND following_id = ?';
+        connection.query(unfollowSql, [userId, followingId], (error) => {
+          if (error) {
+            return res.status(500).json({ error: 'Database error while unfollowing user' });
+          }
+          return res.status(200).json({ message: 'Unfollowed user successfully' });
+        });
+      } else {
+        // User is not following, so follow
+        const followSql = 'INSERT INTO follower_following (follower_id, following_id) VALUES (?, ?)';
+        connection.query(followSql, [userId, followingId], (error) => {
+          if (error) {
+            return res.status(500).json({ error: 'Database error while following user' });
+          }
+          return res.status(201).json({ message: 'Followed user successfully' });
+        });
+      }
+    });
+  });
+});
+
+
+
+
 
 
 
