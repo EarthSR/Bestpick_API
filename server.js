@@ -644,10 +644,11 @@ app.get('/posts/:id', (req, res) => {
     const { id } = req.params;
     
     const queryPost = `
-      SELECT p.*, 
+      SELECT p.*, u.username, u.picture, 
       (SELECT COUNT(*) FROM likes WHERE post_id = ?) AS like_count,
       (SELECT COUNT(*) FROM comments WHERE post_id = ?) AS comment_count
-      FROM posts p 
+      FROM posts p
+      JOIN users u ON p.user_id = u.id 
       WHERE p.id = ?;
     `;
 
@@ -686,7 +687,7 @@ app.get('/posts/:id', (req, res) => {
           comment_count: post.comment_count,
           comments: commentResults.map(comment => ({
             id: comment.id,
-            content: comment.content,
+            content: comment.comment_text,
             created_at: comment.created_at,
             username: comment.username,
             user_profile: comment.user_profile ? comment.user_profile : null
