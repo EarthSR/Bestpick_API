@@ -638,34 +638,68 @@ app.get('/posts', (req, res) => {
 
 
 
-
-
-
-// View a Single Post
+// View a Single Post with Like and Comment Count and Show Comments
 app.get('/posts/:id', (req, res) => {
   try {
     const { id } = req.params;
-    connection.query('SELECT * FROM posts WHERE id = ?', [id], (err, results) => {
+    
+    const queryPost = `
+      SELECT p.*, 
+      (SELECT COUNT(*) FROM likes WHERE post_id = ?) AS like_count,
+      (SELECT COUNT(*) FROM comments WHERE post_id = ?) AS comment_count
+      FROM posts p 
+      WHERE p.id = ?;
+    `;
+
+    const queryComments = `
+      SELECT c.*, u.username, u.picture AS user_profile
+      FROM comments c
+      JOIN users u ON c.user_id = u.id
+      WHERE c.post_id = ?;
+    `;
+
+    // Fetch post data with like and comment count
+    connection.query(queryPost, [id, id, id], (err, postResults) => {
       if (err) {
         console.error('Database error during post retrieval:', err);
         return res.status(500).json({ error: 'Internal server error during post retrieval' });
       }
-      if (results.length === 0) {
+      if (postResults.length === 0) {
         return res.status(404).json({ error: 'Post not found' });
       }
 
-      // Parse JSON fields for the post or wrap them in an array if they're plain strings
-      const post = results[0];
+      const post = postResults[0];
       post.photo_url = isValidJson(post.photo_url) ? JSON.parse(post.photo_url) : [post.photo_url];
       post.video_url = isValidJson(post.video_url) ? JSON.parse(post.video_url) : [post.video_url];
 
-      res.json(post);
+      // Fetch comments related to the post
+      connection.query(queryComments, [id], (err, commentResults) => {
+        if (err) {
+          console.error('Database error during comments retrieval:', err);
+          return res.status(500).json({ error: 'Internal server error during comments retrieval' });
+        }
+
+        // Format the response
+        res.json({
+          ...post,
+          like_count: post.like_count,
+          comment_count: post.comment_count,
+          comments: commentResults.map(comment => ({
+            id: comment.id,
+            content: comment.content,
+            created_at: comment.created_at,
+            username: comment.username,
+            user_profile: comment.user_profile ? comment.user_profile : null
+          }))
+        });
+      });
     });
   } catch (error) {
     console.error('Internal server error:', error.message);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
 
 
 
