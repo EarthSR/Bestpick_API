@@ -584,29 +584,59 @@ function isValidJson(str) {
   }
 }
 
-app.get('/posts', (req, res) => {
-  try { 
 
-    // SQL query to join posts with users
+// API สำหรับตรวจสอบสถานะการกดไลค์ของผู้ใช้
+app.get('/api/checkLikeStatus/:postId/:userId', verifyToken, (req, res) => {
+  const { postId, userId } = req.params;
+  const user_id = req.userId;
+
+  if (user_id != userId){
+    return res.status(403).json({ error: 'Unauthorized' });
+  }
+
+  if (!postId ||!userId) {
+    return res.status(400).json({ error: 'Missing required parameters' });
+  }
+
+
+  // SQL Query เพื่อเช็คสถานะการกดไลค์ในตาราง likes
+  const query = `
+    SELECT COUNT(*) AS isLiked 
+    FROM likes 
+    WHERE post_id = ? AND user_id = ?
+  `;
+
+  pool.query(query, [postId, userId], (err, results) => {
+    if (err) {
+      console.error('Database error during like status check:', err);
+      return res.status(500).json({ error: 'Internal server error during like status check' });
+    }
+
+    // ตรวจสอบว่าแถวที่ได้มามีจำนวน 1 แสดงว่าผู้ใช้กดไลค์โพสต์นี้แล้ว
+    const isLiked = results[0].isLiked > 0;
+    res.json({ isLiked });
+  });
+});
+
+// View All Posts with Token Verification
+app.get('/posts', verifyToken, (req, res) => {
+  try {
+    const userId = req.userId; // ดึง user_id จาก token ที่ผ่านการตรวจสอบแล้ว
+
     const query = `
-      SELECT posts.*, users.username, users.picture 
+      SELECT posts.*, users.username, users.picture, 
+      (SELECT COUNT(*) FROM likes WHERE post_id = posts.id AND user_id = ?) AS is_liked
       FROM posts 
       JOIN users ON posts.user_id = users.id
     `;
 
-    pool.query(query, (err, results) => {
+    pool.query(query, [userId], (err, results) => {
       if (err) {
         console.error('Database error during posts retrieval:', err);
         return res.status(500).json({ error: 'Internal server error during posts retrieval' });
       }
 
-      // Process each post
       const parsedResults = results.map(post => {
-        // Log the raw values for debugging
-        console.log('Raw photo_url:', post.photo_url);
-        console.log('Raw video_url:', post.video_url);
-
-        // Directly use the photo_url and video_url as arrays
         const photoUrls = Array.isArray(post.photo_url) ? post.photo_url.map(photo => photo) : [];
         const videoUrls = Array.isArray(post.video_url) ? post.video_url.map(video => video) : [];
 
@@ -617,13 +647,11 @@ app.get('/posts', (req, res) => {
           updated: post.updated_at,
           photo_url: photoUrls,
           video_url: videoUrls,
-          userName: post.username, // From users table
-          userProfileUrl: post.picture ? post.picture : null // Concatenate with base URL if picture exists
+          userName: post.username,
+          userProfileUrl: post.picture ? post.picture : null,
+          is_liked: post.is_liked > 0 // แปลงค่า is_liked เป็น boolean (`true` ถ้า like, `false` ถ้าไม่ like)
         };
       });
-
-      // Log the parsed results for debugging
-      console.log('Parsed Results:', parsedResults);
 
       res.json(parsedResults);
     });
@@ -633,17 +661,17 @@ app.get('/posts', (req, res) => {
   }
 });
 
-
-
 // View a Single Post with Like and Comment Count and Show Comments
-app.get('/posts/:id', (req, res) => {
+app.get('/posts/:id', verifyToken, (req, res) => {
   try {
     const { id } = req.params;
-    
+    const userId = req.userId; // ดึง user_id จาก token ที่ผ่านการตรวจสอบแล้ว
+
     const queryPost = `
       SELECT p.*, u.username, u.picture, 
       (SELECT COUNT(*) FROM likes WHERE post_id = ?) AS like_count,
-      (SELECT COUNT(*) FROM comments WHERE post_id = ?) AS comment_count
+      (SELECT COUNT(*) FROM comments WHERE post_id = ?) AS comment_count,
+      (SELECT COUNT(*) FROM likes WHERE post_id = ? AND user_id = ?) AS is_liked
       FROM posts p
       JOIN users u ON p.user_id = u.id 
       WHERE p.id = ?;
@@ -656,8 +684,7 @@ app.get('/posts/:id', (req, res) => {
       WHERE c.post_id = ?;
     `;
 
-    // Fetch post data with like and comment count
-    pool.query(queryPost, [id, id, id], (err, postResults) => {
+    pool.query(queryPost, [id, id, id, userId, id], (err, postResults) => {
       if (err) {
         console.error('Database error during post retrieval:', err);
         return res.status(500).json({ error: 'Internal server error during post retrieval' });
@@ -669,19 +696,19 @@ app.get('/posts/:id', (req, res) => {
       const post = postResults[0];
       post.photo_url = isValidJson(post.photo_url) ? JSON.parse(post.photo_url) : [post.photo_url];
       post.video_url = isValidJson(post.video_url) ? JSON.parse(post.video_url) : [post.video_url];
+      post.is_liked = post.is_liked > 0; // แปลงค่า is_liked ให้เป็น boolean
 
-      // Fetch comments related to the post
       pool.query(queryComments, [id], (err, commentResults) => {
         if (err) {
           console.error('Database error during comments retrieval:', err);
           return res.status(500).json({ error: 'Internal server error during comments retrieval' });
         }
 
-        // Format the response
         res.json({
           ...post,
           like_count: post.like_count,
           comment_count: post.comment_count,
+          is_liked: post.is_liked, // เพิ่มสถานะการไลค์ของผู้ใช้ในข้อมูลโพสต์
           comments: commentResults.map(comment => ({
             id: comment.id,
             content: comment.comment_text,
@@ -697,6 +724,9 @@ app.get('/posts/:id', (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+
+
 
 
 
@@ -841,19 +871,18 @@ app.delete('/posts/:id', verifyToken, (req, res) => {
   }
 });
 
-
-// Like or Unlike a Post
+//post likes or unlike 
 app.post('/posts/like/:id', verifyToken, (req, res) => {
-  try {
-    const { id } = req.params;  // Post ID
-    const { user_id } = req.body; // User ID from request body
+  const { id } = req.params;  // Post ID
+  const { user_id } = req.body; // User ID from request body
 
-    // Ensure the user is liking or unliking a post for their own account
+  try {
+    // ตรวจสอบว่า userId ใน token ตรงกับ user_id ใน body หรือไม่
     if (parseInt(req.userId) !== parseInt(user_id)) {
       return res.status(403).json({ error: 'You are not authorized to like this post' });
     }
 
-    // Check if the post exists
+    // ตรวจสอบว่าโพสต์นั้นมีอยู่ในฐานข้อมูลหรือไม่
     const checkPostSql = 'SELECT * FROM posts WHERE id = ?';
     pool.query(checkPostSql, [id], (err, postResults) => {
       if (err) {
@@ -864,7 +893,7 @@ app.post('/posts/like/:id', verifyToken, (req, res) => {
         return res.status(404).json({ error: 'Post not found' });
       }
 
-      // Check if the user has already liked the post
+      // ตรวจสอบว่า user ได้กด like โพสต์นี้แล้วหรือยัง
       const checkLikeSql = 'SELECT * FROM likes WHERE post_id = ? AND user_id = ?';
       pool.query(checkLikeSql, [id, user_id], (err, likeResults) => {
         if (err) {
@@ -873,24 +902,24 @@ app.post('/posts/like/:id', verifyToken, (req, res) => {
         }
 
         if (likeResults.length > 0) {
-          // User already liked the post, so unlike (remove the like)
+          // ถ้าผู้ใช้กด like แล้ว ให้ unlike (ลบ like ออก)
           const unlikeSql = 'DELETE FROM likes WHERE post_id = ? AND user_id = ?';
           pool.query(unlikeSql, [id, user_id], (err) => {
             if (err) {
               console.error('Database error during unlike:', err);
               return res.status(500).json({ error: 'Database error during unlike' });
             }
-            res.status(200).json({ message: 'Post unliked successfully' });
+            res.status(200).json({ message: 'Post unliked successfully', status: 'unliked', liked: false });
           });
         } else {
-          // User hasn't liked the post, so add a like
+          // ถ้ายังไม่กด like ให้เพิ่มการ like
           const likeSql = 'INSERT INTO likes (post_id, user_id) VALUES (?, ?)';
           pool.query(likeSql, [id, user_id], (err) => {
             if (err) {
               console.error('Database error during like:', err);
               return res.status(500).json({ error: 'Database error during like' });
             }
-            res.status(201).json({ message: 'Post liked successfully' });
+            res.status(201).json({ message: 'Post liked successfully', status: 'liked', liked: true });
           });
         }
       });
@@ -900,6 +929,8 @@ app.post('/posts/like/:id', verifyToken, (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+
 
 
 
