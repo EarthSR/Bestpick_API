@@ -27,7 +27,8 @@ admin.initializeApp({
 });
 
 // Database connection (TiDB compatible with SSL)
-const connection = mysql.createConnection({
+// Create Connection Pool
+const pool = mysql.createPool({
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
@@ -35,16 +36,12 @@ const connection = mysql.createConnection({
   port: process.env.DB_PORT,
   ssl: {
     ca: fs.readFileSync('./certs/isrgrootx1.pem'), // Replace with the actual path to your CA certificate
-  }
+  },
+  connectionLimit: 10, // Set the maximum number of connections in the pool
 });
 
-connection.connect(err => {
-  if (err) {
-    console.error('Error connecting to the database:', err);
-    return;
-  }
-  console.log('Connected to the TiDB server.');
-});
+
+console.log('Database connected using Connection Pool.');
 
 
 // Verify Token Middleware
@@ -117,12 +114,12 @@ app.post('/register/email', async (req, res) => {
     const { email } = req.body;
     const checkRegisteredSql = 'SELECT * FROM users WHERE email = ? AND password IS NOT NULL';
 
-    connection.query(checkRegisteredSql, [email], (err, results) => {
+    pool.query(checkRegisteredSql, [email], (err, results) => {
       if (err) throw new Error('Database error during email registration check');
       if (results.length > 0) return res.status(400).json({ error: 'Email already registered' });
 
       const checkSql = 'SELECT * FROM users WHERE email = ? AND password IS NULL';
-      connection.query(checkSql, [email], (err, results) => {
+      pool.query(checkSql, [email], (err, results) => {
         if (err) throw new Error('Database error during email check');
         if (results.length > 0) return res.status(400).json({ error: 'Email already in use or used in another sign-in' });
 
@@ -130,12 +127,12 @@ app.post('/register/email', async (req, res) => {
         const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
         const findOtpSql = 'SELECT * FROM otps WHERE email = ?';
-        connection.query(findOtpSql, [email], (err, otpResults) => {
+        pool.query(findOtpSql, [email], (err, otpResults) => {
           if (err) throw new Error('Database error during OTP retrieval');
 
           if (otpResults.length > 0) {
             const updateOtpSql = 'UPDATE otps SET otp = ?, expires_at = ? WHERE email = ?';
-            connection.query(updateOtpSql, [otp, expiresAt, email], (err) => {
+            pool.query(updateOtpSql, [otp, expiresAt, email], (err) => {
               if (err) throw new Error('Database error during OTP update');
               sendOtpEmail(email, otp, (error) => {
                 if (error) throw new Error('Error sending OTP email');
@@ -144,7 +141,7 @@ app.post('/register/email', async (req, res) => {
             });
           } else {
             const insertOtpSql = 'INSERT INTO otps (email, otp, expires_at) VALUES (?, ?, ?)';
-            connection.query(insertOtpSql, [email, otp, expiresAt], (err) => {
+            pool.query(insertOtpSql, [email, otp, expiresAt], (err) => {
               if (err) throw new Error('Database error during OTP insertion');
               sendOtpEmail(email, otp, (error) => {
                 if (error) throw new Error('Error sending OTP email');
@@ -167,7 +164,7 @@ app.post('/register/verify-otp', async (req, res) => {
     const { email, otp } = req.body;
     const verifyOtpSql = 'SELECT otp, expires_at FROM otps WHERE email = ? AND otp = ?';
     
-    connection.query(verifyOtpSql, [email, otp], (err, results) => {
+    pool.query(verifyOtpSql, [email, otp], (err, results) => {
       if (err) throw new Error('Database error during OTP verification');
       if (results.length === 0) return res.status(400).json({ error: 'Invalid OTP' });
 
@@ -191,11 +188,11 @@ app.post('/register/set-password', async (req, res) => {
     const hash = await bcrypt.hash(password, 10);
 
     const sql = 'INSERT INTO users (email, password) VALUES (?, ?)';
-    connection.query(sql, [email, hash], (err) => {
+    pool.query(sql, [email, hash], (err) => {
       if (err) throw new Error('Database error during registration');
 
       const deleteOtpSql = 'DELETE FROM otps WHERE email = ?';
-      connection.query(deleteOtpSql, [email], (err) => {
+      pool.query(deleteOtpSql, [email], (err) => {
         if (err) throw new Error('Database error during OTP cleanup');
         res.status(201).json({ message: 'User registered successfully' });
       });
@@ -212,7 +209,7 @@ app.post('/resend-otp/register', async (req, res) => {
     const { email } = req.body;
     const findOtpSql = 'SELECT otp, expires_at FROM otps WHERE email = ?';
 
-    connection.query(findOtpSql, [email], (err, results) => {
+    pool.query(findOtpSql, [email], (err, results) => {
       if (err) throw new Error('Database error during OTP lookup');
       if (results.length === 0) return res.status(400).json({ error: 'No OTP found for this email. Please register first.' });
 
@@ -223,7 +220,7 @@ app.post('/resend-otp/register', async (req, res) => {
         const newOtp = generateOtp();
         const newExpiresAt = new Date(now.getTime() + 10 * 60 * 1000);
         const updateOtpSql = 'UPDATE otps SET otp = ?, expires_at = ? WHERE email = ?';
-        connection.query(updateOtpSql, [newOtp, newExpiresAt, email], (err) => {
+        pool.query(updateOtpSql, [newOtp, newExpiresAt, email], (err) => {
           if (err) throw new Error('Database error during OTP update');
           sendOtpEmail(email, newOtp, (error) => {
             if (error) throw new Error('Error sending OTP email');
@@ -249,7 +246,7 @@ app.post('/forgot-password', async (req, res) => {
     const { email } = req.body;
     const userCheckSql = 'SELECT * FROM users WHERE email = ? AND password IS NOT NULL';
 
-    connection.query(userCheckSql, [email], (err, userResults) => {
+    pool.query(userCheckSql, [email], (err, userResults) => {
       if (err) throw new Error('Database error during email check');
       if (userResults.length === 0) return res.status(400).json({ error: 'Email not found' });
 
@@ -257,12 +254,12 @@ app.post('/forgot-password', async (req, res) => {
       const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
       const otpCheckSql = 'SELECT * FROM password_resets WHERE email = ?';
-      connection.query(otpCheckSql, [email], (err, otpResults) => {
+      pool.query(otpCheckSql, [email], (err, otpResults) => {
         if (err) throw new Error('Database error during OTP check');
 
         if (otpResults.length > 0) {
           const updateOtpSql = 'UPDATE password_resets SET otp = ?, expires_at = ? WHERE email = ?';
-          connection.query(updateOtpSql, [otp, expiresAt, email], (err) => {
+          pool.query(updateOtpSql, [otp, expiresAt, email], (err) => {
             if (err) throw new Error('Database error during OTP update');
             sendOtpEmail(email, otp, (error) => {
               if (error) throw new Error('Error sending OTP email');
@@ -271,7 +268,7 @@ app.post('/forgot-password', async (req, res) => {
           });
         } else {
           const saveOtpSql = 'INSERT INTO password_resets (email, otp, expires_at) VALUES (?, ?, ?)';
-          connection.query(saveOtpSql, [email, otp, expiresAt], (err) => {
+          pool.query(saveOtpSql, [email, otp, expiresAt], (err) => {
             if (err) throw new Error('Database error during OTP save');
             sendOtpEmail(email, otp, (error) => {
               if (error) throw new Error('Error sending OTP email');
@@ -295,7 +292,7 @@ app.post('/verify-reset-otp', async (req, res) => {
     if (!email || !otp) return res.status(400).json({ error: 'Email and OTP are required' });
 
     const verifyOtpSql = 'SELECT otp, expires_at FROM password_resets WHERE email = ? AND otp = ?';
-    connection.query(verifyOtpSql, [email, otp], (err, results) => {
+    pool.query(verifyOtpSql, [email, otp], (err, results) => {
       if (err) throw new Error('Database error during OTP verification');
       if (results.length === 0) return res.status(400).json({ error: 'Invalid OTP or email' });
 
@@ -319,11 +316,11 @@ app.post('/reset-password', async (req, res) => {
     const hashedPassword = await bcrypt.hash(newPassword, 10);
 
     const updatePasswordSql = 'UPDATE users SET password = ? WHERE email = ?';
-    connection.query(updatePasswordSql, [hashedPassword, email], (err) => {
+    pool.query(updatePasswordSql, [hashedPassword, email], (err) => {
       if (err) throw new Error('Database error during password update');
 
       const deleteOtpSql = 'DELETE FROM password_resets WHERE email = ?';
-      connection.query(deleteOtpSql, [email], (err) => {
+      pool.query(deleteOtpSql, [email], (err) => {
         if (err) throw new Error('Database error during OTP deletion');
         res.status(200).json({ message: 'Password has been updated successfully' });
       });
@@ -340,12 +337,12 @@ app.post('/resent-otp/reset-password', async (req, res) => {
     const { email } = req.body;
     const userCheckSql = 'SELECT * FROM users WHERE email = ?';
 
-    connection.query(userCheckSql, [email], (err, userResults) => {
+    pool.query(userCheckSql, [email], (err, userResults) => {
       if (err) throw new Error('Database error during email check');
       if (userResults.length === 0) return res.status(400).json({ error: 'Email not found' });
 
       const otpCheckSql = 'SELECT * FROM password_resets WHERE email = ?';
-      connection.query(otpCheckSql, [email], (err, otpResults) => {
+      pool.query(otpCheckSql, [email], (err, otpResults) => {
         if (err) throw new Error('Database error during OTP check');
         if (otpResults.length === 0) return res.status(400).json({ error: 'No OTP record found for this email' });
 
@@ -353,7 +350,7 @@ app.post('/resent-otp/reset-password', async (req, res) => {
         const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
         const updateOtpSql = 'UPDATE password_resets SET otp = ?, expires_at = ? WHERE email = ?';
-        connection.query(updateOtpSql, [otp, expiresAt, email], (err) => {
+        pool.query(updateOtpSql, [otp, expiresAt, email], (err) => {
           if (err) throw new Error('Database error during OTP update');
           sendOtpEmail(email, otp, (error) => {
             if (error) throw new Error('Error sending OTP email');
@@ -377,7 +374,7 @@ app.post('/login', async (req, res) => {
     const ipAddress = req.headers['x-forwarded-for'] || req.connection.remoteAddress;
 
     const sql = 'SELECT * FROM users WHERE email = ?';
-    connection.query(sql, [email], (err, results) => {
+    pool.query(sql, [email], (err, results) => {
       if (err) throw new Error('Database error during login');
       if (results.length === 0) {
         return res.status(404).json({ message: 'No user found' });
@@ -406,7 +403,7 @@ app.post('/login', async (req, res) => {
         if (!isMatch) {
           // Increment failed attempts and update last_failed_attempt
           const updateFailSql = 'UPDATE users SET failed_attempts = failed_attempts + 1, last_failed_attempt = NOW() WHERE id = ?';
-          connection.query(updateFailSql, [user.id], (err) => {
+          pool.query(updateFailSql, [user.id], (err) => {
             if (err) console.error('Error logging failed login attempt:', err);
           });
 
@@ -416,7 +413,7 @@ app.post('/login', async (req, res) => {
 
         // Reset failed attempts after a successful login
         const resetFailSql = 'UPDATE users SET failed_attempts = 0, last_login = NOW(), last_login_ip = ? WHERE id = ?';
-        connection.query(resetFailSql, [ipAddress, user.id], (err) => {
+        pool.query(resetFailSql, [ipAddress, user.id], (err) => {
           if (err) throw new Error('Error resetting failed attempts or updating login time.');
 
           // Generate JWT token
@@ -458,7 +455,7 @@ app.post('/set-username', verifyToken, (req, res) => {
 
   // Check if the username is already taken
   const checkUsernameQuery = 'SELECT * FROM users WHERE username = ?';
-  connection.query(checkUsernameQuery, [newUsername], (err, results) => {
+  pool.query(checkUsernameQuery, [newUsername], (err, results) => {
     if (err) {
       return res.status(500).json({ message: 'Database error checking username' });
     }
@@ -469,7 +466,7 @@ app.post('/set-username', verifyToken, (req, res) => {
 
     // Update the user's username
     const updateUsernameQuery = 'UPDATE users SET username = ? WHERE id = ?';
-    connection.query(updateUsernameQuery, [newUsername, userId], (err) => {
+    pool.query(updateUsernameQuery, [newUsername, userId], (err) => {
       if (err) {
         return res.status(500).json({ message: 'Error updating username' });
       }
@@ -493,13 +490,13 @@ app.post('/google-signin', async (req, res) => {
     }
 
     const checkGoogleIdSql = 'SELECT * FROM users WHERE google_id = ?';
-    connection.query(checkGoogleIdSql, [googleId], (err, googleIdResults) => {
+    pool.query(checkGoogleIdSql, [googleId], (err, googleIdResults) => {
       if (err) throw new Error('Database error during Google ID check');
 
       if (googleIdResults.length > 0) {
         const user = googleIdResults[0];
         const updateSql = 'UPDATE users SET email = ? WHERE google_id = ?';
-        connection.query(updateSql, [email, googleId], (err) => {
+        pool.query(updateSql, [email, googleId], (err) => {
           if (err) throw new Error('Database error during user update');
 
           const token = jwt.sign({ id: user.id}, JWT_SECRET);
@@ -517,17 +514,17 @@ app.post('/google-signin', async (req, res) => {
         });
       } else {
         const checkEmailSql = 'SELECT * FROM users WHERE email = ?';
-        connection.query(checkEmailSql, [email], (err, emailResults) => {
+        pool.query(checkEmailSql, [email], (err, emailResults) => {
           if (err) throw new Error('Database error during email check');
           if (emailResults.length > 0) return res.status(409).json({ error: 'Email already registered with another account' });
 
           const insertSql = 'INSERT INTO users (google_id, email, username) VALUES (?, ?, "")';
-          connection.query(insertSql, [googleId, email], (err, result) => {
+          pool.query(insertSql, [googleId, email], (err, result) => {
             if (err) throw new Error('Database error during user insertion');
 
             const newUserId = result.insertId;
             const newUserSql = 'SELECT * FROM users WHERE id = ?';
-            connection.query(newUserSql, [newUserId], (err, newUserResults) => {
+            pool.query(newUserSql, [newUserId], (err, newUserResults) => {
               if (err) throw new Error('Database error during new user fetch');
 
               const newUser = newUserResults[0];
@@ -568,7 +565,7 @@ app.post('/interactions', async (req, res) => {
     const query = 'INSERT INTO user_interactions (user_id, post_id, action_type) VALUES (?, ?, ?)';
     const values = [user_id, post_id, action_type];
 
-    connection.query(query, values, (err, results) => {
+    pool.query(query, values, (err, results) => {
       if (err) throw new Error('Database error during interaction recording');
       res.status(201).json({ message: 'Interaction recorded successfully', interaction_id: results.insertId });
     });
@@ -597,7 +594,7 @@ app.get('/posts', (req, res) => {
       JOIN users ON posts.user_id = users.id
     `;
 
-    connection.query(query, (err, results) => {
+    pool.query(query, (err, results) => {
       if (err) {
         console.error('Database error during posts retrieval:', err);
         return res.status(500).json({ error: 'Internal server error during posts retrieval' });
@@ -660,7 +657,7 @@ app.get('/posts/:id', (req, res) => {
     `;
 
     // Fetch post data with like and comment count
-    connection.query(queryPost, [id, id, id], (err, postResults) => {
+    pool.query(queryPost, [id, id, id], (err, postResults) => {
       if (err) {
         console.error('Database error during post retrieval:', err);
         return res.status(500).json({ error: 'Internal server error during post retrieval' });
@@ -674,7 +671,7 @@ app.get('/posts/:id', (req, res) => {
       post.video_url = isValidJson(post.video_url) ? JSON.parse(post.video_url) : [post.video_url];
 
       // Fetch comments related to the post
-      connection.query(queryComments, [id], (err, commentResults) => {
+      pool.query(queryComments, [id], (err, commentResults) => {
         if (err) {
           console.error('Database error during comments retrieval:', err);
           return res.status(500).json({ error: 'Internal server error during comments retrieval' });
@@ -749,7 +746,7 @@ app.post('/posts/create', verifyToken, upload.fields([{ name: 'photo', maxCount:
     const video_urls_json = JSON.stringify(video_urls);
 
     const query = 'INSERT INTO posts (user_id, content, video_url, photo_url) VALUES (?, ?, ?, ?)';
-    connection.query(query, [user_id, content, video_urls_json, photo_urls_json], (err, results) => {
+    pool.query(query, [user_id, content, video_urls_json, photo_urls_json], (err, results) => {
       if (err) {
         console.error('Database error during post creation:', err);
         return res.status(500).json({ error: 'Database error during post creation' });
@@ -796,7 +793,7 @@ app.put('/posts/:id', verifyToken, upload.fields([{ name: 'photo', maxCount: 10 
     const video_urls_json = JSON.stringify(video_urls);
 
     const query = 'UPDATE posts SET content = ?, video_url = ?, photo_url = ?, updated_at = NOW() WHERE post_id = ? AND user_id = ?';
-    connection.query(query, [content, video_urls_json, photo_urls_json, id, user_id], (err, results) => {
+    pool.query(query, [content, video_urls_json, photo_urls_json, id, user_id], (err, results) => {
       if (err) {
         console.error('Database error during post update:', err);
         return res.status(500).json({ error: 'Database error during post update' });
@@ -828,7 +825,7 @@ app.delete('/posts/:id', verifyToken, (req, res) => {
       return res.status(403).json({ error: 'You are not authorized to delete this post' });
     }
 
-    connection.query('DELETE FROM posts WHERE post_id = ? AND user_id = ?', [id, user_id], (err, results) => {
+    pool.query('DELETE FROM posts WHERE post_id = ? AND user_id = ?', [id, user_id], (err, results) => {
       if (err) {
         console.error('Database error during post deletion:', err);
         return res.status(500).json({ error: 'Database error during post deletion' });
@@ -858,7 +855,7 @@ app.post('/posts/like/:id', verifyToken, (req, res) => {
 
     // Check if the post exists
     const checkPostSql = 'SELECT * FROM posts WHERE id = ?';
-    connection.query(checkPostSql, [id], (err, postResults) => {
+    pool.query(checkPostSql, [id], (err, postResults) => {
       if (err) {
         console.error('Database error during post check:', err);
         return res.status(500).json({ error: 'Database error during post check' });
@@ -869,7 +866,7 @@ app.post('/posts/like/:id', verifyToken, (req, res) => {
 
       // Check if the user has already liked the post
       const checkLikeSql = 'SELECT * FROM likes WHERE post_id = ? AND user_id = ?';
-      connection.query(checkLikeSql, [id, user_id], (err, likeResults) => {
+      pool.query(checkLikeSql, [id, user_id], (err, likeResults) => {
         if (err) {
           console.error('Database error during like check:', err);
           return res.status(500).json({ error: 'Database error during like check' });
@@ -878,7 +875,7 @@ app.post('/posts/like/:id', verifyToken, (req, res) => {
         if (likeResults.length > 0) {
           // User already liked the post, so unlike (remove the like)
           const unlikeSql = 'DELETE FROM likes WHERE post_id = ? AND user_id = ?';
-          connection.query(unlikeSql, [id, user_id], (err) => {
+          pool.query(unlikeSql, [id, user_id], (err) => {
             if (err) {
               console.error('Database error during unlike:', err);
               return res.status(500).json({ error: 'Database error during unlike' });
@@ -888,7 +885,7 @@ app.post('/posts/like/:id', verifyToken, (req, res) => {
         } else {
           // User hasn't liked the post, so add a like
           const likeSql = 'INSERT INTO likes (post_id, user_id) VALUES (?, ?)';
-          connection.query(likeSql, [id, user_id], (err) => {
+          pool.query(likeSql, [id, user_id], (err) => {
             if (err) {
               console.error('Database error during like:', err);
               return res.status(500).json({ error: 'Database error during like' });
@@ -935,7 +932,7 @@ app.get('/search', (req, res) => {
 
   console.log('Executing SQL query with value:', searchValue); // Log query for debugging
 
-  connection.query(searchSql, [searchValue, searchValue], (err, results) => {
+  pool.query(searchSql, [searchValue, searchValue], (err, results) => {
     if (err) {
       console.error('Database error during search:', err);
       return res.status(500).json({ error: 'Internal server error' });
@@ -998,7 +995,7 @@ app.get('/api/users/:userId/profile', verifyToken, (req, res) => {
       GROUP BY u.id;
   `;
 
-  connection.query(sql, [userId], (error, results) => {
+  pool.query(sql, [userId], (error, results) => {
       if (error) {
           return res.status(500).json({ error: 'Database error while fetching user profile' });
       }
@@ -1051,7 +1048,7 @@ app.put('/api/users/:userId/profile', verifyToken, upload.single('profileImage')
   `;
 
   // Execute the SQL query to check for existing username
-  connection.query(checkUsernameSql, [username, userId], (error, results) => {
+  pool.query(checkUsernameSql, [username, userId], (error, results) => {
     if (error) {
       return res.status(500).json({ error: 'Database error while checking username' });
     }
@@ -1078,7 +1075,7 @@ app.put('/api/users/:userId/profile', verifyToken, upload.single('profileImage')
     updateProfileSql += ` WHERE id = ?;`;
 
     // Execute the SQL query to update the user's profile
-    connection.query(updateProfileSql, updateData, (error, results) => {
+    pool.query(updateProfileSql, updateData, (error, results) => {
       if (error) {
         return res.status(500).json({ error: 'Database error while updating user profile' });
       }
@@ -1110,7 +1107,7 @@ app.post('/api/users/:userId/follow/:followingId', verifyToken, (req, res) => {
 
   // Check if the following user exists
   const checkFollowingSql = 'SELECT * FROM users WHERE id = ?';
-  connection.query(checkFollowingSql, [followingId], (error, followingResults) => {
+  pool.query(checkFollowingSql, [followingId], (error, followingResults) => {
     if (error) {
       return res.status(500).json({ error: 'Database error while checking following user' });
     }
@@ -1120,7 +1117,7 @@ app.post('/api/users/:userId/follow/:followingId', verifyToken, (req, res) => {
 
     // Check if the user is already following the other user
     const checkFollowSql = 'SELECT * FROM follower_following WHERE follower_id = ? AND following_id = ?';
-    connection.query(checkFollowSql, [userId, followingId], (error, followResults) => {
+    pool.query(checkFollowSql, [userId, followingId], (error, followResults) => {
       if (error) {
         return res.status(500).json({ error: 'Database error while checking follow status' });
       }
@@ -1128,7 +1125,7 @@ app.post('/api/users/:userId/follow/:followingId', verifyToken, (req, res) => {
       if (followResults.length > 0) {
         // User is already following, so unfollow
         const unfollowSql = 'DELETE FROM follower_following WHERE follower_id = ? AND following_id = ?';
-        connection.query(unfollowSql, [userId, followingId], (error) => {
+        pool.query(unfollowSql, [userId, followingId], (error) => {
           if (error) {
             return res.status(500).json({ error: 'Database error while unfollowing user' });
           }
@@ -1137,7 +1134,7 @@ app.post('/api/users/:userId/follow/:followingId', verifyToken, (req, res) => {
       } else {
         // User is not following, so follow
         const followSql = 'INSERT INTO follower_following (follower_id, following_id) VALUES (?, ?)';
-        connection.query(followSql, [userId, followingId], (error) => {
+        pool.query(followSql, [userId, followingId], (error) => {
           if (error) {
             return res.status(500).json({ error: 'Database error while following user' });
           }
