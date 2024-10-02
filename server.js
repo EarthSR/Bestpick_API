@@ -950,16 +950,18 @@ app.get('/search', (req, res) => {
   // Trim the query to remove any leading/trailing spaces and convert it to lowercase
   const searchValue = `%${query.trim().toLowerCase()}%`;
 
-  // SQL query to search posts by content or username (case-insensitive, partial matches)
+  // SQL query to search posts by content or username, and include user_id and post_id
   const searchSql = `
   SELECT 
+    u.id AS user_id,   -- Include user ID
     u.username, 
+    p.id AS post_id,   -- Include post ID
     LEFT(p.content, 100) AS content_preview  -- Show the first 100 characters as a preview
   FROM users u
-  LEFT JOIN posts p ON p.user_id = u.id  -- Change to LEFT JOIN to include users with no posts
+  LEFT JOIN posts p ON p.user_id = u.id
   WHERE LOWER(u.username) LIKE LOWER(?) OR LOWER(p.content) LIKE LOWER(?)
   ORDER BY p.updated_at DESC
-`;
+  `;
 
   console.log('Executing SQL query with value:', searchValue); // Log query for debugging
 
@@ -981,22 +983,31 @@ app.get('/search', (req, res) => {
       const existingUser = acc.find(user => user.username === username);
 
       if (existingUser) {
-        // If the username exists, add the content_preview to their posts array
-        existingUser.posts.push(post.content_preview);
+        // If the username exists, add the post information to their posts array
+        existingUser.posts.push({
+          post_id: post.post_id,         // Add post_id to the post object
+          content_preview: post.content_preview
+        });
       } else {
         // If the username does not exist, create a new entry for the user
         acc.push({
+          user_id: post.user_id,         // Include user_id in the user object
           username: post.username,
-          posts: [post.content_preview] // Initialize with the first post
+          posts: [{
+            post_id: post.post_id,       // Add post_id to the post object
+            content_preview: post.content_preview
+          }]
         });
       }
 
       return acc;
     }, []); // Start with an empty array for grouping
 
+    // ส่งข้อมูล groupedResults กลับในรูปแบบ JSON
     res.json({ results: groupedResults });
   });
 });
+
 
 
 
