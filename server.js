@@ -746,37 +746,43 @@ const storage = multer.diskStorage({
   }
 });
 
-const upload = multer({ storage });
+const upload = multer({
+  dest: 'uploads/', // ที่เก็บไฟล์
+  limits: {
+    fileSize: 10 * 1024 * 1024 // จำกัดขนาดไฟล์ที่อัปโหลด (10MB)
+  }
+});
 
 
 // Create a Post
 app.post('/posts/create', verifyToken, upload.fields([{ name: 'photo', maxCount: 10 }, { name: 'video', maxCount: 10 }]), (req, res) => {
   try {
-    const { user_id, content } = req.body;
+    const { user_id, content, category } = req.body; // รับหมวดหมู่จาก req.body
     let photo_urls = [];
     let video_urls = [];
 
-    // Ensure the user is creating a post for their own account
+    // ตรวจสอบการสร้างโพสต์โดยผู้ใช้ที่ถูกต้อง
     if (parseInt(req.userId) !== parseInt(user_id)) {
       return res.status(403).json({ error: 'You are not authorized to create a post for this user' });
     }
 
-    // Get uploaded photo URLs
+    // รับ URL ของรูปภาพที่อัปโหลด
     if (req.files['photo']) {
-      photo_urls = req.files['photo'].map(file => `/uploads/${file.filename}`);
+      photo_urls = req.files['photo'].map(file => `/uploads/${file.filename}`); // แก้ไขเพื่อไม่ใส่นามสกุลไฟล์ที่นี่
     }
 
-    // Get uploaded video URLs
+    // รับ URL ของวิดีโอที่อัปโหลด
     if (req.files['video']) {
-      video_urls = req.files['video'].map(file => `/uploads/${file.filename}`);
+      video_urls = req.files['video'].map(file => `/uploads/${file.filename}`); // แก้ไขเพื่อไม่ใส่นามสกุลไฟล์ที่นี่
     }
 
-    // Convert arrays to JSON strings for storage
+    // แปลงอาร์เรย์เป็น JSON strings สำหรับจัดเก็บ
     const photo_urls_json = JSON.stringify(photo_urls);
     const video_urls_json = JSON.stringify(video_urls);
 
-    const query = 'INSERT INTO posts (user_id, content, video_url, photo_url) VALUES (?, ?, ?, ?)';
-    pool.query(query, [user_id, content, video_urls_json, photo_urls_json], (err, results) => {
+    // แก้ไขคำสั่ง SQL เพื่อรวมหมวดหมู่
+    const query = 'INSERT INTO posts (user_id, content, video_url, photo_url, category) VALUES (?, ?, ?, ?, ?)';
+    pool.query(query, [user_id, content, video_urls_json, photo_urls_json, category], (err, results) => {
       if (err) {
         console.error('Database error during post creation:', err);
         return res.status(500).json({ error: 'Database error during post creation' });
@@ -785,8 +791,9 @@ app.post('/posts/create', verifyToken, upload.fields([{ name: 'photo', maxCount:
         post_id: results.insertId,
         user_id,
         content,
-        video_urls: video_urls,
-        photo_urls: photo_urls
+        category, // ส่งหมวดหมู่กลับไปด้วย
+        video_urls,
+        photo_urls
       });
     });
   } catch (error) {
@@ -794,6 +801,7 @@ app.post('/posts/create', verifyToken, upload.fields([{ name: 'photo', maxCount:
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
 
 // Update a Post
 app.put('/posts/:id', verifyToken, upload.fields([{ name: 'photo', maxCount: 10 }, { name: 'video', maxCount: 10 }]), (req, res) => {
