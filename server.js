@@ -961,8 +961,7 @@ app.post('/posts/like/:id', verifyToken, (req, res) => {
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 
-
-// Search API with grouped results by username
+// Search API with grouped results by username, and include only the first photo_url
 app.get('/search', (req, res) => {
   const { query } = req.query;
 
@@ -973,22 +972,24 @@ app.get('/search', (req, res) => {
   // Trim the query to remove any leading/trailing spaces and convert it to lowercase
   const searchValue = `%${query.trim().toLowerCase()}%`;
 
-  // SQL query to search posts by content or username, and include user_id and post_id
+  // SQL query to search posts by content, title, or username, and include user_id, post_id, title, and photo_url
   const searchSql = `
-  SELECT 
-    u.id AS user_id,   -- Include user ID
-    u.username, 
-    p.id AS post_id,   -- Include post ID
-    LEFT(p.content, 100) AS content_preview  -- Show the first 100 characters as a preview
-  FROM users u
-  LEFT JOIN posts p ON p.user_id = u.id
-  WHERE LOWER(u.username) LIKE LOWER(?) OR LOWER(p.content) LIKE LOWER(?)
-  ORDER BY p.updated_at DESC
+    SELECT 
+      u.id AS user_id,                -- Include user ID
+      u.username, 
+      p.id AS post_id,                -- Include post ID
+      LEFT(p.content, 100) AS content_preview,  -- Show the first 100 characters as a preview
+      p.title,                        -- Include post title
+      p.photo_url                     -- Include the photo_url as a string
+    FROM users u
+    LEFT JOIN posts p ON p.user_id = u.id
+    WHERE LOWER(u.username) LIKE ? 
+      OR LOWER(p.content) LIKE ? 
+      OR LOWER(p.title) LIKE ?        -- Add search condition for title
+    ORDER BY p.updated_at DESC
   `;
 
-  console.log('Executing SQL query with value:', searchValue); // Log query for debugging
-
-  pool.query(searchSql, [searchValue, searchValue], (err, results) => {
+  pool.query(searchSql, [searchValue, searchValue, searchValue], (err, results) => {
     if (err) {
       console.error('Database error during search:', err);
       return res.status(500).json({ error: 'Internal server error' });
@@ -1002,6 +1003,50 @@ app.get('/search', (req, res) => {
     const groupedResults = results.reduce((acc, post) => {
       const username = post.username;
 
+      // ตรวจสอบประเภทของ photo_url และแปลงเป็นสตริงถ้าจำเป็น
+      let photoUrlString = "";
+      if (post.photo_url) {
+        // กรณี photo_url เป็น object เช่น ถูกดึงมาเป็น JSON object แทน string
+        if (typeof post.photo_url === "object") {
+          console.log('photo_url object content:', post.photo_url);
+
+          // ลองแปลงเป็นสตริง JSON
+          try {
+            photoUrlString = JSON.stringify(post.photo_url);
+            console.warn(`photo_url is an object, converted to JSON string: ${photoUrlString}`);
+          } catch (e) {
+            console.error('Failed to stringify photo_url:', e);
+            photoUrlString = ""; // ถ้าไม่สามารถแปลงได้ ให้เป็นค่าว่าง
+          }
+        } else if (Buffer.isBuffer(post.photo_url)) {
+          photoUrlString = post.photo_url.toString(); // แปลง Buffer เป็นสตริง
+        } else if (typeof post.photo_url === "string") {
+          photoUrlString = post.photo_url; // หากเป็นสตริงอยู่แล้วให้ใช้ได้เลย
+        } else {
+          console.warn(`Unexpected type for photo_url: ${typeof post.photo_url}`);
+        }
+      }
+
+      // ตรวจสอบและแปลง photo_url ที่เป็นสตริงให้อยู่ในรูปแบบอาร์เรย์
+      let firstPhotoUrl = "";
+      try {
+        // ตรวจสอบว่า photo_url เป็น JSON Array หรือไม่
+        if (photoUrlString.startsWith("[") && photoUrlString.endsWith("]")) {
+          // ถ้าเป็น JSON Array, ใช้ JSON.parse
+          const photoArray = JSON.parse(photoUrlString);
+          if (Array.isArray(photoArray) && photoArray.length > 0) {
+            firstPhotoUrl = photoArray[0];  // ดึงเฉพาะรูปภาพแรกจากอาร์เรย์
+          }
+        } else {
+          // ถ้า photo_url เป็นสตริงธรรมดาที่คั่นด้วยจุลภาค
+          const photoArray = photoUrlString.split(",");
+          firstPhotoUrl = photoArray[0];  // ดึงเฉพาะรูปภาพแรกจากการแยกสตริง
+        }
+      } catch (e) {
+        console.error('Error parsing photo_url:', e);
+        firstPhotoUrl = ""; // กรณีที่ photo_url ไม่สามารถแปลงได้ ให้เป็นค่าว่าง
+      }
+
       // Check if the username already exists in the accumulator (grouped results)
       const existingUser = acc.find(user => user.username === username);
 
@@ -1009,7 +1054,9 @@ app.get('/search', (req, res) => {
         // If the username exists, add the post information to their posts array
         existingUser.posts.push({
           post_id: post.post_id,         // Add post_id to the post object
-          content_preview: post.content_preview
+          title: post.title,             // Include title in the post object
+          content_preview: post.content_preview,
+          photo_url: firstPhotoUrl       // Include only the first photo_url
         });
       } else {
         // If the username does not exist, create a new entry for the user
@@ -1018,7 +1065,9 @@ app.get('/search', (req, res) => {
           username: post.username,
           posts: [{
             post_id: post.post_id,       // Add post_id to the post object
-            content_preview: post.content_preview
+            title: post.title,           // Include title in the post object
+            content_preview: post.content_preview,
+            photo_url: firstPhotoUrl     // Include only the first photo_url
           }]
         });
       }
@@ -1030,8 +1079,6 @@ app.get('/search', (req, res) => {
     res.json({ results: groupedResults });
   });
 });
-
-
 
 
 
