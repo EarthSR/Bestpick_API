@@ -590,18 +590,19 @@ app.get('/api/checkLikeStatus/:postId/:userId', verifyToken, (req, res) => {
   const { postId, userId } = req.params;
   const user_id = req.userId;
 
-  if (user_id != userId){
-    return res.status(403).json({ error: 'Unauthorized' });
+  // ตรวจสอบสิทธิ์ว่าผู้ใช้มีสิทธิ์ในการเข้าถึงหรือไม่
+  if (user_id != userId) {
+    return res.status(403).json({ error: 'Unauthorized access: User ID does not match' });
   }
 
-  if (!postId ||!userId) {
-    return res.status(400).json({ error: 'Missing required parameters' });
+  // ตรวจสอบว่า postId และ userId มีค่า
+  if (!postId || !userId) {
+    return res.status(400).json({ error: 'Missing required parameters: postId or userId' });
   }
-
 
   // SQL Query เพื่อเช็คสถานะการกดไลค์ในตาราง likes
   const query = `
-    SELECT COUNT(*) AS isLiked 
+    SELECT COUNT(*) AS isLiked
     FROM likes 
     WHERE post_id = ? AND user_id = ?
   `;
@@ -612,11 +613,13 @@ app.get('/api/checkLikeStatus/:postId/:userId', verifyToken, (req, res) => {
       return res.status(500).json({ error: 'Internal server error during like status check' });
     }
 
-    // ตรวจสอบว่าแถวที่ได้มามีจำนวน 1 แสดงว่าผู้ใช้กดไลค์โพสต์นี้แล้ว
+    // ตรวจสอบสถานะการกดไลค์ (ถ้าผลลัพธ์มากกว่า 0 แสดงว่ามีการกดไลค์)
     const isLiked = results[0].isLiked > 0;
+    console.log('isLiked:', isLiked);
     res.json({ isLiked });
   });
 });
+
 
 // View All Posts with Token Verification
 app.get('/posts', verifyToken, (req, res) => {
@@ -871,10 +874,10 @@ app.delete('/posts/:id', verifyToken, (req, res) => {
   }
 });
 
-//post likes or unlike 
+// API สำหรับกด like หรือ unlike โพสต์
 app.post('/posts/like/:id', verifyToken, (req, res) => {
-  const { id } = req.params;  // Post ID
-  const { user_id } = req.body; // User ID from request body
+  const { id } = req.params; // Post ID จาก URL
+  const { user_id } = req.body; // User ID จาก body ของ request
 
   try {
     // ตรวจสอบว่า userId ใน token ตรงกับ user_id ใน body หรือไม่
@@ -909,7 +912,17 @@ app.post('/posts/like/:id', verifyToken, (req, res) => {
               console.error('Database error during unlike:', err);
               return res.status(500).json({ error: 'Database error during unlike' });
             }
-            res.status(200).json({ message: 'Post unliked successfully', status: 'unliked', liked: false });
+
+            // หลังจาก unlike เสร็จ ให้ดึงค่า likeCount ใหม่
+            const likeCountQuery = 'SELECT COUNT(*) AS likeCount FROM likes WHERE post_id = ?';
+            pool.query(likeCountQuery, [id], (err, countResults) => {
+              if (err) {
+                console.error('Database error during like count:', err);
+                return res.status(500).json({ error: 'Database error during like count' });
+              }
+              const likeCount = countResults[0].likeCount;
+              res.status(200).json({ message: 'Post unliked successfully', status: 'unliked', liked: false, likeCount });
+            });
           });
         } else {
           // ถ้ายังไม่กด like ให้เพิ่มการ like
@@ -919,7 +932,17 @@ app.post('/posts/like/:id', verifyToken, (req, res) => {
               console.error('Database error during like:', err);
               return res.status(500).json({ error: 'Database error during like' });
             }
-            res.status(201).json({ message: 'Post liked successfully', status: 'liked', liked: true });
+
+            // หลังจาก like เสร็จ ให้ดึงค่า likeCount ใหม่
+            const likeCountQuery = 'SELECT COUNT(*) AS likeCount FROM likes WHERE post_id = ?';
+            pool.query(likeCountQuery, [id], (err, countResults) => {
+              if (err) {
+                console.error('Database error during like count:', err);
+                return res.status(500).json({ error: 'Database error during like count' });
+              }
+              const likeCount = countResults[0].likeCount;
+              res.status(201).json({ message: 'Post liked successfully', status: 'liked', liked: true, likeCount });
+            });
           });
         }
       });
