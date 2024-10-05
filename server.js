@@ -22,6 +22,7 @@ app.use(cors()); // Enable CORS
 
 // Initialize Firebase Admin SDK
 const serviceAccount = require('./config/apilogin-6efd6-firebase-adminsdk-b3l6z-c2e5fe541a.json');
+const { title } = require('process');
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
 });
@@ -645,6 +646,8 @@ app.get('/posts', verifyToken, (req, res) => {
 
         return {
           id: post.id,
+          userId: post.user_id,
+          title: post.Title,
           content: post.content,
           time: post.time,
           updated: post.updated_at,
@@ -652,7 +655,6 @@ app.get('/posts', verifyToken, (req, res) => {
           video_url: videoUrls,
           userName: post.username,
           userProfileUrl: post.picture ? post.picture : null,
-          is_liked: post.is_liked > 0 // แปลงค่า is_liked เป็น boolean (`true` ถ้า like, `false` ถ้าไม่ like)
         };
       });
 
@@ -711,6 +713,7 @@ app.get('/posts/:id', verifyToken, (req, res) => {
           ...post,
           like_count: post.like_count,
           comment_count: post.comment_count,
+          update: post.updated_at,
           is_liked: post.is_liked, // เพิ่มสถานะการไลค์ของผู้ใช้ในข้อมูลโพสต์
           comments: commentResults.map(comment => ({
             id: comment.id,
@@ -1254,6 +1257,42 @@ app.post('/api/users/:userId/follow/:followingId', verifyToken, (req, res) => {
     });
   });
 });
+
+
+// API endpoint to check follow status of a user
+app.get('/api/users/:userId/follow/:followingId/status', verifyToken, (req, res) => {
+  const userId = req.params.userId;
+  const followingId = req.params.followingId;
+
+  // Ensure that the user making the request is the same as the one being checked
+  if (req.userId.toString() !== userId) {
+    return res.status(403).json({ error: 'You are not authorized to check follow status for this user' });
+  }
+
+  // Check if the following user exists
+  const checkFollowingSql = 'SELECT * FROM users WHERE id = ?';
+  pool.query(checkFollowingSql, [followingId], (error, followingResults) => {
+    if (error) {
+      return res.status(500).json({ error: 'Database error while checking following user' });
+    }
+    if (followingResults.length === 0) {
+      return res.status(404).json({ error: 'User to check follow status not found' });
+    }
+
+    // Check if the user is already following the other user
+    const checkFollowSql = 'SELECT * FROM follower_following WHERE follower_id = ? AND following_id = ?';
+    pool.query(checkFollowSql, [userId, followingId], (error, followResults) => {
+      if (error) {
+        return res.status(500).json({ error: 'Database error while checking follow status' });
+      }
+
+      // If the user is following, return true, else return false
+      const isFollowing = followResults.length > 0;
+      return res.status(200).json({ isFollowing });
+    });
+  });
+});
+
 
 
 
