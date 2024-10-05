@@ -977,6 +977,7 @@ app.get('/search', (req, res) => {
     SELECT 
       u.id AS user_id,                -- Include user ID
       u.username, 
+      u.picture,
       p.id AS post_id,                -- Include post ID
       LEFT(p.content, 100) AS content_preview,  -- Show the first 100 characters as a preview
       p.title,                        -- Include post title
@@ -1063,6 +1064,7 @@ app.get('/search', (req, res) => {
         acc.push({
           user_id: post.user_id,         // Include user_id in the user object
           username: post.username,
+          profile_image: post.picture,
           posts: [{
             post_id: post.post_id,       // Add post_id to the post object
             title: post.title,           // Include title in the post object
