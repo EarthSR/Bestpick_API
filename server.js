@@ -735,7 +735,6 @@ app.get('/posts/:id', verifyToken, (req, res) => {
 
 
 
-// Set up multer for file uploads
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const dir = 'uploads/';
@@ -745,12 +744,24 @@ const storage = multer.diskStorage({
     cb(null, dir);
   },
   filename: (req, file, cb) => {
-    cb(null, `${Date.now()}_${file.originalname}`);
+    const uniqueName = crypto.randomBytes(16).toString('hex');
+    const fileExtension = path.extname(file.originalname); // ดึงนามสกุลไฟล์ เช่น .jpg, .png
+    const originalName = path.basename(file.originalname, fileExtension); // ดึงชื่อไฟล์ต้นฉบับ
+    const timestamp = Date.now(); // เวลาปัจจุบันในหน่วย milliseconds
+
+    // ตั้งชื่อไฟล์ใหม่ด้วย timestamp, original name, unique hash และ extension
+    const newFileName = `${timestamp}_${originalName}_${uniqueName}${fileExtension}`;
+    
+    // แสดงชื่อไฟล์ใน console log เพื่อตรวจสอบ
+    console.log(`File saved as: ${newFileName}`);
+    
+    cb(null, newFileName); // บันทึกชื่อไฟล์
   }
 });
 
+
 const upload = multer({
-  dest: 'uploads/', // ที่เก็บไฟล์
+  storage: storage, // เปลี่ยนจาก dest เป็น storage ที่เราสร้างไว้
   limits: {
     fileSize: 10 * 1024 * 1024 // จำกัดขนาดไฟล์ที่อัปโหลด (10MB)
   }
@@ -1146,75 +1157,52 @@ app.get('/api/users/:userId/profile', verifyToken, (req, res) => {
 
 
 
-// API endpoint to update user profile data with image
 app.put('/api/users/:userId/profile', verifyToken, upload.single('profileImage'), (req, res) => {
   const userId = req.params.userId;
 
-  // Ensure that the user making the request is the same as the one being updated
-  if (req.userId.toString() !== userId) {
-    return res.status(403).json({ error: 'You are not authorized to update this profile' });
-  }
-
   // Extract the data from the request body
   const { username, bio, gender } = req.body;
-  const profileImage = req.file ? `/uploads/${req.file.filename}` : null; // Check if the image was uploaded
-
+  const profileImage = req.file ? `/uploads/${req.file.filename}` : null; // เพิ่มการต่อด้วย path.extname() เพื่อให้แน่ใจว่านามสกุลไฟล์ถูกต้อง
+  console.log(profileImage);
   // Validate that the necessary fields are provided
   if (!username || !bio || !gender) {
     return res.status(400).json({ error: 'All fields are required: username, bio, and gender' });
   }
 
-  // First, check if the username already exists for a different user
-  const checkUsernameSql = `
-    SELECT id FROM users WHERE username = ? AND id != ?;
-  `;
+  // SQL query to update the user's profile
+  let updateProfileSql = `UPDATE users SET username = ?, bio = ?, gender = ?`;
 
-  // Execute the SQL query to check for existing username
-  pool.query(checkUsernameSql, [username, userId], (error, results) => {
+  const updateData = [username, bio, gender, userId];
+
+  // If an image was uploaded, include the profileImage in the update
+  if (profileImage) {
+    updateProfileSql += `, picture = ?`;
+    updateData.splice(3, 0, profileImage); // Insert profileImage into the query parameters
+  }
+
+  updateProfileSql += ` WHERE id = ?;`;
+
+  // Execute the SQL query to update the user's profile
+  pool.query(updateProfileSql, updateData, (error, results) => {
     if (error) {
-      return res.status(500).json({ error: 'Database error while checking username' });
+      return res.status(500).json({ error: 'Database error while updating user profile' });
     }
 
-    // If results length > 0, it means the username is already taken by another user
-    if (results.length > 0) {
-      return res.status(400).json({ error: 'Username already taken' });
+    if (results.affectedRows === 0) {
+      return res.status(404).json({ error: 'User not found' });
     }
 
-    // SQL query to update the user's profile
-    let updateProfileSql = `
-      UPDATE users 
-      SET username = ?, bio = ?, gender = ?
-    `;
-
-    const updateData = [username, bio, gender, userId];
-
-    // If an image was uploaded, include the profileImage in the update
-    if (profileImage) {
-      updateProfileSql += `, picture = ?`;
-      updateData.splice(3, 0, profileImage); // Insert profileImage into the query parameters
-    }
-
-    updateProfileSql += ` WHERE id = ?;`;
-
-    // Execute the SQL query to update the user's profile
-    pool.query(updateProfileSql, updateData, (error, results) => {
-      if (error) {
-        return res.status(500).json({ error: 'Database error while updating user profile' });
-      }
-
-      // If no rows were affected, the user was not found
-      if (results.affectedRows === 0) {
-        return res.status(404).json({ error: 'User not found' });
-      }
-
-      // Respond with a success message and the profile image URL if updated
-      res.json({
-        message: 'Profile updated successfully',
-        profileImage: profileImage ? profileImage : null
-      });
+    // Respond with a success message and the profile image URL
+    res.json({
+      message: 'Profile updated successfully',
+      profileImage: profileImage // ส่งค่า profileImage กลับแบบเต็มรวม path และ extension
     });
   });
 });
+
+
+
+
 
 
 // API endpoint to follow or unfollow another user
