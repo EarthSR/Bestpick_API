@@ -554,27 +554,133 @@ app.post('/google-signin', async (req, res) => {
 });
 
 
-// Record User Interaction (Like, Comment, etc.)
-app.post('/interactions', async (req, res) => {
-  try {
-    const { user_id, post_id, action_type } = req.body;
+// POST /api/interactions - บันทึกการโต้ตอบใหม่ (Create Interaction)
+app.post('/api/interactions', verifyToken, async (req, res) => {
+  const { post_id, action_type, content } = req.body;
+  const user_id = req.userId; // ดึง userId จาก Token
 
-    if (!user_id || !post_id || !action_type) {
-      return res.status(400).json({ error: 'Missing required fields' });
+  // ตรวจสอบข้อมูลที่ส่งมาว่าไม่ว่างเปล่า
+  if (!user_id || !post_id || !action_type) {
+    return res.status(400).json({ error: 'Missing required fields: user_id, post_id, or action_type' });
+  }
+
+  const insertSql = `
+    INSERT INTO user_interactions (user_id, post_id, action_type, content)
+    VALUES (?, ?, ?, ?);
+  `;
+  const values = [user_id, post_id, action_type, content || null];
+
+  pool.query(insertSql, values, (error, results) => {
+    if (error) {
+      console.error('Database error:', error);
+      return res.status(500).json({ error: 'Error saving interaction' });
+    }
+    res.status(201).json({ message: 'Interaction saved successfully', interaction_id: results.insertId });
+  });
+});
+
+// GET /api/interactions - ดึงข้อมูลการโต้ตอบทั้งหมด
+app.get('/api/interactions', verifyToken, async (req, res) => {
+  const fetchSql = `
+    SELECT 
+        ui.id, 
+        u.username, 
+        p.content AS post_content, 
+        ui.action_type, 
+        ui.content AS interaction_content, 
+        ui.created_at 
+    FROM user_interactions ui
+    JOIN users u ON ui.user_id = u.id
+    JOIN posts p ON ui.post_id = p.id
+    ORDER BY ui.created_at DESC;
+  `;
+
+  pool.query(fetchSql, (error, results) => {
+    if (error) {
+      console.error('Database error:', error);
+      return res.status(500).json({ error: 'Error fetching interactions' });
+    }
+    res.json(results);
+  });
+});
+
+// GET /api/interactions/user/:userId - ดึงข้อมูลการโต้ตอบของผู้ใช้แต่ละคน
+app.get('/api/interactions/user/:userId', verifyToken, async (req, res) => {
+  const { userId } = req.params;
+
+  if (parseInt(req.userId) !== parseInt(userId)) {
+    return res.status(403).json({ error: 'Unauthorized access: User ID does not match' });
+  }
+
+  const fetchUserInteractionsSql = `
+    SELECT 
+        ui.id, 
+        u.username, 
+        p.content AS post_content, 
+        ui.action_type, 
+        ui.content AS interaction_content, 
+        ui.created_at 
+    FROM user_interactions ui
+    JOIN users u ON ui.user_id = u.id
+    JOIN posts p ON ui.post_id = p.id
+    WHERE ui.user_id = ?
+    ORDER BY ui.created_at DESC;
+  `;
+
+  pool.query(fetchUserInteractionsSql, [userId], (error, results) => {
+    if (error) {
+      console.error('Database error:', error);
+      return res.status(500).json({ error: 'Error fetching user interactions' });
+    }
+    res.json(results);
+  });
+});
+
+// DELETE /api/interactions/:id - ลบข้อมูลการโต้ตอบตาม ID
+app.delete('/api/interactions/:id', verifyToken, async (req, res) => {
+  const { id } = req.params;
+
+  const deleteSql = 'DELETE FROM user_interactions WHERE id = ? AND user_id = ?';
+  pool.query(deleteSql, [id, req.userId], (error, results) => {
+    if (error) {
+      console.error('Database error:', error);
+      return res.status(500).json({ error: 'Error deleting interaction' });
     }
 
-    const query = 'INSERT INTO user_interactions (user_id, post_id, action_type) VALUES (?, ?, ?)';
-    const values = [user_id, post_id, action_type];
+    if (results.affectedRows === 0) {
+      return res.status(404).json({ message: 'Interaction not found or you are not authorized to delete this interaction' });
+    }
 
-    pool.query(query, values, (err, results) => {
-      if (err) throw new Error('Database error during interaction recording');
-      res.status(201).json({ message: 'Interaction recorded successfully', interaction_id: results.insertId });
-    });
-  } catch (error) {
-    console.error(error.message);
-    res.status(500).json({ error: 'Internal server error' });
-  }
+    res.json({ message: 'Interaction deleted successfully' });
+  });
 });
+
+// PUT /api/interactions/:id - อัปเดตข้อมูลการโต้ตอบตาม ID
+app.put('/api/interactions/:id', verifyToken, async (req, res) => {
+  const { id } = req.params;
+  const { action_type, content } = req.body;
+
+  const updateSql = `
+    UPDATE user_interactions 
+    SET action_type = ?, content = ?, updated_at = NOW() 
+    WHERE id = ? AND user_id = ?;
+  `;
+  const values = [action_type, content || null, id, req.userId];
+
+  pool.query(updateSql, values, (error, results) => {
+    if (error) {
+      console.error('Database error:', error);
+      return res.status(500).json({ error: 'Error updating interaction' });
+    }
+
+    if (results.affectedRows === 0) {
+      return res.status(404).json({ message: 'Interaction not found or you are not authorized to update this interaction' });
+    }
+
+    res.json({ message: 'Interaction updated successfully' });
+  });
+});
+
 
 function isValidJson(str) {
   try {
