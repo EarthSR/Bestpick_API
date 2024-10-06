@@ -1314,9 +1314,7 @@ app.get('/api/users/:userId/view-profile', verifyToken, (req, res) => {
         console.error('Database error while fetching user posts:', postError);
         return res.status(500).json({ error: 'Database error while fetching user posts' });
       }
-
-      // เพิ่มการตรวจสอบข้อมูลใน `postResults`
-      console.log('Post Results:', postResults);
+     
 
       // ตรวจสอบและแปลง photo_url และ video_url ให้เป็น JSON Array
       const formattedPosts = postResults.map(post => {
