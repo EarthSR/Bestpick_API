@@ -554,21 +554,23 @@ app.post('/google-signin', async (req, res) => {
 });
 
 
-// POST /api/interactions - บันทึกการโต้ตอบใหม่ (Create Interaction)
+// POST /api/interactions - บันทึกการโต้ตอบใหม่ 
 app.post('/api/interactions', verifyToken, async (req, res) => {
   const { post_id, action_type, content } = req.body;
   const user_id = req.userId; // ดึง userId จาก Token
 
   // ตรวจสอบข้อมูลที่ส่งมาว่าไม่ว่างเปล่า
-  if (!user_id || !post_id || !action_type) {
-    return res.status(400).json({ error: 'Missing required fields: user_id, post_id, or action_type' });
+  const postIdValue = post_id ? post_id : null;
+
+  if (!user_id || !action_type) {
+    return res.status(400).json({ error: 'Missing required fields: user_id or action_type' });
   }
 
   const insertSql = `
     INSERT INTO user_interactions (user_id, post_id, action_type, content)
     VALUES (?, ?, ?, ?);
   `;
-  const values = [user_id, post_id, action_type, content || null];
+  const values = [user_id, postIdValue, action_type, content || null];
 
   pool.query(insertSql, values, (error, results) => {
     if (error) {
@@ -578,6 +580,7 @@ app.post('/api/interactions', verifyToken, async (req, res) => {
     res.status(201).json({ message: 'Interaction saved successfully', interaction_id: results.insertId });
   });
 });
+
 
 // GET /api/interactions - ดึงข้อมูลการโต้ตอบทั้งหมด
 app.get('/api/interactions', verifyToken, async (req, res) => {
@@ -723,7 +726,6 @@ app.get('/api/checkLikeStatus/:postId/:userId', verifyToken, (req, res) => {
 
     // ตรวจสอบสถานะการกดไลค์ (ถ้าผลลัพธ์มากกว่า 0 แสดงว่ามีการกดไลค์)
     const isLiked = results[0].isLiked > 0;
-    console.log('isLiked:', isLiked);
     res.json({ isLiked });
   });
 });
@@ -824,6 +826,7 @@ app.get('/posts/:id', verifyToken, (req, res) => {
           is_liked: post.is_liked, // เพิ่มสถานะการไลค์ของผู้ใช้ในข้อมูลโพสต์
           comments: commentResults.map(comment => ({
             id: comment.id,
+            user_id: comment.user_id,
             content: comment.comment_text,
             created_at: comment.created_at,
             username: comment.username,
@@ -837,8 +840,6 @@ app.get('/posts/:id', verifyToken, (req, res) => {
     res.status(500).json({ error: 'Internal server error' });
   }
 });
-
-
 
 
 
@@ -1507,6 +1508,8 @@ app.get('/api/users/:userId/follow/:followingId/status', verifyToken, (req, res)
   });
 });
 
+
+// api comment
 app.post('/posts/:postId/comment', verifyToken, (req, res) => {
   try {
     const { postId } = req.params; // ดึง postId จากพารามิเตอร์
