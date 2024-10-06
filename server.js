@@ -48,7 +48,7 @@ console.log('Database connected using Connection Pool.');
 // Verify Token Middleware
 const verifyToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
-  
+
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return res.status(403).json({ error: 'No token provided or incorrect format' });
   }
@@ -66,7 +66,7 @@ const verifyToken = (req, res, next) => {
 // Generate OTP
 function generateOtp() {
   const otp = crypto.randomBytes(3).toString('hex'); // 3 bytes = 6 hex characters
-  return parseInt(otp, 16).toString().slice(0, 4); 
+  return parseInt(otp, 16).toString().slice(0, 4);
 }
 
 function sendOtpEmail(email, otp, callback) {
@@ -164,7 +164,7 @@ app.post('/register/verify-otp', async (req, res) => {
   try {
     const { email, otp } = req.body;
     const verifyOtpSql = 'SELECT otp, expires_at FROM otps WHERE email = ? AND otp = ?';
-    
+
     pool.query(verifyOtpSql, [email, otp], (err, results) => {
       if (err) throw new Error('Database error during OTP verification');
       if (results.length === 0) return res.status(400).json({ error: 'Invalid OTP' });
@@ -500,7 +500,7 @@ app.post('/google-signin', async (req, res) => {
         pool.query(updateSql, [email, googleId], (err) => {
           if (err) throw new Error('Database error during user update');
 
-          const token = jwt.sign({ id: user.id}, JWT_SECRET);
+          const token = jwt.sign({ id: user.id }, JWT_SECRET);
           return res.json({
             message: 'User information updated successfully',
             token,
@@ -529,7 +529,7 @@ app.post('/google-signin', async (req, res) => {
               if (err) throw new Error('Database error during new user fetch');
 
               const newUser = newUserResults[0];
-              const token = jwt.sign({ id: newUser.id}, JWT_SECRET);
+              const token = jwt.sign({ id: newUser.id }, JWT_SECRET);
 
               return res.status(201).json({
                 message: 'User registered and authenticated successfully',
@@ -581,7 +581,7 @@ app.post('/api/interactions', verifyToken, async (req, res) => {
 
 // GET /api/interactions - ดึงข้อมูลการโต้ตอบทั้งหมด
 app.get('/api/interactions', verifyToken, async (req, res) => {
-  
+
   const fetchSql = `
     SELECT 
         ui.id, 
@@ -861,10 +861,10 @@ const storage = multer.diskStorage({
 
     // ตั้งชื่อไฟล์ใหม่ด้วย timestamp, original name, unique hash และ extension
     const newFileName = `${timestamp}_${originalName}_${uniqueName}${fileExtension}`;
-    
+
     // แสดงชื่อไฟล์ใน console log เพื่อตรวจสอบ
     console.log(`File saved as: ${newFileName}`);
-    
+
     cb(null, newFileName); // บันทึกชื่อไฟล์
   }
 });
@@ -1219,7 +1219,7 @@ app.get('/api/users/:userId/profile', verifyToken, (req, res) => {
 
   if (req.userId.toString() !== userId) {
     return res.status(403).json({ error: 'You are not authorized to view this profile' });
-}
+  }
 
   // SQL query to get user profile and count posts
   const sql = `
@@ -1239,31 +1239,140 @@ app.get('/api/users/:userId/profile', verifyToken, (req, res) => {
   `;
 
   pool.query(sql, [userId], (error, results) => {
-      if (error) {
-          return res.status(500).json({ error: 'Database error while fetching user profile' });
-      }
-      if (results.length === 0) {
-          return res.status(404).json({ error: 'User not found' });
-      }
+    if (error) {
+      return res.status(500).json({ error: 'Database error while fetching user profile' });
+    }
+    if (results.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
 
-      const userProfile = results[0];
+    const userProfile = results[0];
 
-      // Construct the response
-      const response = {
-          userId: userProfile.userId,
-          username: userProfile.username,
-          profileImageUrl: userProfile.profileImageUrl,
-          followerCount: userProfile.follower_count,
-          followingCount: userProfile.following_count,
-          postCount: userProfile.post_count,
-          gender: userProfile.gender,
-          bio:userProfile.bio
-      };
+    // Construct the response
+    const response = {
+      userId: userProfile.userId,
+      username: userProfile.username,
+      profileImageUrl: userProfile.profileImageUrl,
+      followerCount: userProfile.follower_count,
+      followingCount: userProfile.following_count,
+      postCount: userProfile.post_count,
+      gender: userProfile.gender,
+      bio: userProfile.bio
+    };
 
-      // Send the response
-      res.json(response);
+    // Send the response
+    res.json(response);
   });
 });
+
+// GET /api/users/:userId/view-profile - ดูโปรไฟล์ของผู้ใช้คนอื่น
+app.get('/api/users/:userId/view-profile', verifyToken, (req, res) => {
+  const { userId } = req.params;
+
+  const profileSql = `
+    SELECT 
+      u.id AS userId, 
+      u.username, 
+      u.picture AS profileImageUrl,
+      u.bio,
+      u.gender, 
+      COUNT(p.id) AS post_count,
+      (SELECT COUNT(*) FROM follower_following WHERE following_id = u.id) AS follower_count, 
+      (SELECT COUNT(*) FROM follower_following WHERE follower_id = u.id) AS following_count   
+    FROM users u
+    LEFT JOIN posts p ON p.user_id = u.id
+    WHERE u.id = ?
+    GROUP BY u.id;
+  `;
+
+  const postSql = `
+    SELECT 
+      p.id AS post_id, 
+      p.content, 
+      p.photo_url, 
+      p.video_url, 
+      p.updated_at,
+      (SELECT COUNT(*) FROM likes WHERE post_id = p.id) AS like_count,
+      (SELECT COUNT(*) FROM comments WHERE post_id = p.id) AS comment_count
+    FROM posts p
+    WHERE p.user_id = ?
+    ORDER BY p.updated_at DESC;
+  `;
+
+  pool.query(profileSql, [userId], (error, profileResults) => {
+    if (error) {
+      return res.status(500).json({ error: 'Database error while fetching user profile' });
+    }
+    if (profileResults.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const userProfile = profileResults[0];
+
+    pool.query(postSql, [userId], (postError, postResults) => {
+      if (postError) {
+        console.error('Database error while fetching user posts:', postError);
+        return res.status(500).json({ error: 'Database error while fetching user posts' });
+      }
+
+      // เพิ่มการตรวจสอบข้อมูลใน `postResults`
+      console.log('Post Results:', postResults);
+
+      // ตรวจสอบและแปลง photo_url และ video_url ให้เป็น JSON Array
+      const formattedPosts = postResults.map(post => {
+        let photos = [];
+        let videos = [];
+
+        // ตรวจสอบว่า `photo_url` เป็นอาร์เรย์อยู่แล้วหรือไม่
+        if (Array.isArray(post.photo_url)) {
+          photos = post.photo_url; // หากเป็นอาร์เรย์ ให้ใช้ข้อมูลตรง ๆ
+        } else if (typeof post.photo_url === 'string') {
+          try {
+            photos = JSON.parse(post.photo_url); // กรณีที่เป็นสตริง JSON Array ให้แปลงเป็นอาร์เรย์
+          } catch (e) {
+            console.error('Error parsing photo_url:', e.message);
+          }
+        }
+
+        // ตรวจสอบว่า `video_url` เป็นอาร์เรย์อยู่แล้วหรือไม่
+        if (Array.isArray(post.video_url)) {
+          videos = post.video_url; // หากเป็นอาร์เรย์ ให้ใช้ข้อมูลตรง ๆ
+        } else if (typeof post.video_url === 'string') {
+          try {
+            videos = JSON.parse(post.video_url); // กรณีที่เป็นสตริง JSON Array ให้แปลงเป็นอาร์เรย์
+          } catch (e) {
+            console.error('Error parsing video_url:', e.message);
+          }
+        }
+
+        return {
+          post_id: post.post_id,
+          content: post.content,
+          created_at: post.updated_at,
+          like_count: post.like_count,
+          comment_count: post.comment_count,
+          photos,  // ส่งกลับ photos ที่ถูกแปลงเป็น Array แล้ว
+          videos   // ส่งกลับ videos ที่ถูกแปลงเป็น Array แล้ว
+        };
+      });
+
+      res.json({
+        userId: userProfile.userId,
+        username: userProfile.username,
+        profileImageUrl: userProfile.profileImageUrl,
+        followerCount: userProfile.follower_count,
+        followingCount: userProfile.following_count,
+        postCount: userProfile.post_count,
+        gender: userProfile.gender,
+        bio: userProfile.bio,
+        posts: formattedPosts
+      });
+    });
+  });
+});
+
+
+
 
 
 
