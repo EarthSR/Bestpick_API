@@ -581,6 +581,7 @@ app.post('/api/interactions', verifyToken, async (req, res) => {
 
 // GET /api/interactions - ดึงข้อมูลการโต้ตอบทั้งหมด
 app.get('/api/interactions', verifyToken, async (req, res) => {
+  
   const fetchSql = `
     SELECT 
         ui.id, 
@@ -1399,11 +1400,42 @@ app.get('/api/users/:userId/follow/:followingId/status', verifyToken, (req, res)
   });
 });
 
+app.post('/posts/:postId/comment', verifyToken, (req, res) => {
+  try {
+    const { postId } = req.params; // ดึง postId จากพารามิเตอร์
+    const { content } = req.body; // ดึงเนื้อหาคอมเมนต์จาก Body
+    const userId = req.userId; // ดึง userId จาก Token ที่ผ่านการตรวจสอบแล้ว
 
+    // ตรวจสอบว่าเนื้อหาคอมเมนต์ไม่ว่างเปล่า
+    if (!content || content.trim() === '') {
+      return res.status(400).json({ error: 'Comment content cannot be empty' });
+    }
 
+    // SQL สำหรับการเพิ่มคอมเมนต์ใหม่ลงในฐานข้อมูล
+    const insertCommentSql = `
+      INSERT INTO comments (post_id, user_id, comment_text)
+      VALUES (?, ?, ?);
+    `;
 
+    pool.query(insertCommentSql, [postId, userId, content], (error, results) => {
+      if (error) {
+        console.error('Database error during comment insertion:', error);
+        return res.status(500).json({ error: 'Error saving comment to the database' });
+      }
 
-
+      res.status(201).json({
+        message: 'Comment added successfully',
+        comment_id: results.insertId,
+        post_id: postId,
+        user_id: userId,
+        content,
+      });
+    });
+  } catch (error) {
+    console.error('Internal server error:', error.message);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
 
 
 
