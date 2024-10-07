@@ -1548,6 +1548,30 @@ app.post('/posts/:postId/comment', verifyToken, (req, res) => {
 });
 
 
+// API to Add a Post to Bookmark
+app.post('/posts/:postId/bookmark', verifyToken, (req, res) => {
+  const { postId } = req.params; // ดึง postId จากพารามิเตอร์
+  const userId = req.userId; // ดึง userId จาก Token ที่ผ่านการตรวจสอบแล้ว
+
+  // ตรวจสอบว่า postId ไม่ว่างเปล่า
+  if (!postId) {
+    return res.status(400).json({ error: 'Post ID is required' });
+  }
+
+  // SQL Query เพื่อเพิ่ม post เข้าไปในตาราง bookmark ของผู้ใช้
+  const addBookmarkSql = 'INSERT INTO bookmarks (user_id, post_id) VALUES (?, ?);';
+
+  pool.query(addBookmarkSql, [userId, postId], (err, results) => {
+    if (err) {
+      console.error('Database error during adding to bookmark:', err);
+      return res.status(500).json({ error: 'Error adding post to bookmarks' });
+    }
+
+    res.status(201).json({ message: 'Post added to bookmarks successfully' });
+  });
+});
+
+
 
 
 
