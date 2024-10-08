@@ -1018,7 +1018,6 @@ app.post(
             video_urls,
             photo_urls,
           });
-          console.log(Title,content)
         }
       );
     } catch (error) {
