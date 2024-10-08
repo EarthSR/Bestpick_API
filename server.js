@@ -1120,7 +1120,7 @@ app.delete("/posts/:id", verifyToken, (req, res) => {
     }
 
     pool.query(
-      "DELETE FROM posts WHERE post_id = ? AND user_id = ?",
+      "DELETE FROM posts WHERE id = ? AND user_id = ?",
       [id, user_id],
       (err, results) => {
         if (err) {
