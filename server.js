@@ -1102,39 +1102,50 @@ app.put(
 
 // Delete a Post
 app.delete("/posts/:id", verifyToken, (req, res) => {
-  try {
-    const { id } = req.params;
-    const { user_id } = req.body;
+  const { id } = req.params;
+  const user_id = req.userId; // Get user ID from the token
 
-    if (parseInt(req.userId) !== parseInt(user_id)) {
-      return res
-        .status(403)
-        .json({ error: "You are not authorized to delete this post" });
-    }
-
-    pool.query(
-      "DELETE FROM posts WHERE id = ? AND user_id = ?",
-      [id, user_id],
-      (err, results) => {
-        if (err) {
-          console.error("Database error during post deletion:", err);
-          return res
-            .status(500)
-            .json({ error: "Database error during post deletion" });
-        }
-        if (results.affectedRows === 0) {
-          return res
-            .status(404)
-            .json({ error: "Post not found or you are not the owner" });
-        }
-        res.json({ message: "Post deleted successfully" });
+  // Check if the post belongs to the user
+  const postCheckSql = "SELECT * FROM posts WHERE id = ? AND user_id = ?";
+  pool.query(postCheckSql, [id, user_id], (postError, postResults) => {
+      if (postError) {
+          console.error("Database error during post check:", postError);
+          return res.status(500).json({ error: "Database error during post check" });
       }
-    );
-  } catch (error) {
-    console.error("Internal server error:", error.message);
-    res.status(500).json({ error: "Internal server error" });
-  }
+      if (postResults.length === 0) {
+          return res.status(404).json({ error: "Post not found or you are not the owner" });
+      }
+
+      // Delete notifications related to the post
+      const deleteNotificationsSql = "DELETE FROM notifications WHERE post_id = ?";
+      pool.query(deleteNotificationsSql, [id], (deleteNotificationError) => {
+          if (deleteNotificationError) {
+              console.error("Database error during notification deletion:", deleteNotificationError);
+              return res.status(500).json({ error: "Database error during notification deletion" });
+          }
+
+          // Delete the post
+          const deletePostSql = "DELETE FROM posts WHERE id = ? AND user_id = ?";
+          pool.query(deletePostSql, [id, user_id], (deletePostError, deletePostResults) => {
+              if (deletePostError) {
+                  console.error("Database error during post deletion:", deletePostError);
+                  return res.status(500).json({ error: "Database error during post deletion" });
+              }
+
+              if (deletePostResults.affectedRows === 0) {
+                  return res.status(404).json({ error: "Post not found or you are not the owner" });
+              }
+
+              res.json({ message: "Post deleted successfully" });
+          });
+      });
+  });
 });
+
+
+
+
+
 
 // API สำหรับกด like หรือ unlike โพสต์
 app.post("/posts/like/:id", verifyToken, (req, res) => {
