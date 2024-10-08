@@ -974,55 +974,47 @@ app.post(
   ]),
   (req, res) => {
     try {
-      const { user_id, content, category } = req.body; // รับหมวดหมู่จาก req.body
+      const { user_id, content, category, Title, ProductNumber } = req.body; // รับค่า ProductNumber เป็น String จาก req.body
       let photo_urls = [];
       let video_urls = [];
 
       // ตรวจสอบการสร้างโพสต์โดยผู้ใช้ที่ถูกต้อง
       if (parseInt(req.userId) !== parseInt(user_id)) {
-        return res
-          .status(403)
-          .json({
-            error: "You are not authorized to create a post for this user",
-          });
+        return res.status(403).json({
+          error: "You are not authorized to create a post for this user",
+        });
       }
 
       // รับ URL ของรูปภาพที่อัปโหลด
       if (req.files["photo"]) {
-        photo_urls = req.files["photo"].map(
-          (file) => `/uploads/${file.filename}`
-        ); // แก้ไขเพื่อไม่ใส่นามสกุลไฟล์ที่นี่
+        photo_urls = req.files["photo"].map((file) => `/uploads/${file.filename}`);
       }
 
       // รับ URL ของวิดีโอที่อัปโหลด
       if (req.files["video"]) {
-        video_urls = req.files["video"].map(
-          (file) => `/uploads/${file.filename}`
-        ); // แก้ไขเพื่อไม่ใส่นามสกุลไฟล์ที่นี่
+        video_urls = req.files["video"].map((file) => `/uploads/${file.filename}`);
       }
 
-      // แปลงอาร์เรย์เป็น JSON strings สำหรับจัดเก็บ
       const photo_urls_json = JSON.stringify(photo_urls);
       const video_urls_json = JSON.stringify(video_urls);
 
-      // แก้ไขคำสั่ง SQL เพื่อรวมหมวดหมู่
       const query =
-        "INSERT INTO posts (user_id, content, video_url, photo_url, category) VALUES (?, ?, ?, ?, ?)";
+        "INSERT INTO posts (user_id, content, video_url, photo_url, category, Title, ProductNumber) VALUES (?, ?, ?, ?, ?, ?, ?)";
       pool.query(
         query,
-        [user_id, content, video_urls_json, photo_urls_json, category],
+        [user_id, content, video_urls_json, photo_urls_json, category, Title, ProductNumber],
         (err, results) => {
           if (err) {
             console.error("Database error during post creation:", err);
-            return res
-              .status(500)
-              .json({ error: "Database error during post creation" });
+            return res.status(500).json({ error: "Database error during post creation" });
           }
           res.status(201).json({
             post_id: results.insertId,
             user_id,
             content,
-            category, // ส่งหมวดหมู่กลับไปด้วย
+            category,
+            Title,
+            ProductNumber, // ส่งค่ากลับไปเพื่อแสดงผล
             video_urls,
             photo_urls,
           });
@@ -1034,6 +1026,7 @@ app.post(
     }
   }
 );
+
 
 // Update a Post
 app.put(
