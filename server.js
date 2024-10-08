@@ -1398,6 +1398,7 @@ app.get("/api/users/:userId/profile", verifyToken, (req, res) => {
       u.username, 
       u.picture AS profileImageUrl,
       u.bio ,
+      u.email,
       u.gender, 
       COUNT(p.id) AS post_count,
       (SELECT COUNT(*) FROM follower_following WHERE following_id = u.id) AS follower_count, 
@@ -1423,6 +1424,7 @@ app.get("/api/users/:userId/profile", verifyToken, (req, res) => {
     // Construct the response
     const response = {
       userId: userProfile.userId,
+      email: userProfile.email,
       username: userProfile.username,
       profileImageUrl: userProfile.profileImageUrl,
       followerCount: userProfile.follower_count,
