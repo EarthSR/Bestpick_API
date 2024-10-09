@@ -27,7 +27,6 @@ admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
 });
 
-// Database connection (TiDB compatible with SSL)
 // Create Connection Pool
 const pool = mysql.createPool({
   host: process.env.DB_HOST,
@@ -35,14 +34,50 @@ const pool = mysql.createPool({
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
   port: process.env.DB_PORT,
+  waitForConnections: true,
+  connectionLimit: 20, // เพิ่มจำนวนการเชื่อมต่อสูงสุดใน Pool
+  queueLimit: 0,
+  connectTimeout: 60000, // ปรับเป็น 60 วินาที
+  acquireTimeout: 60000, // ปรับเป็น 60 วินาที
   ssl: {
-    ca: fs.readFileSync("./certs/isrgrootx1.pem"), // Replace with the actual path to your CA certificate
+    ca: fs.readFileSync("./certs/isrgrootx1.pem"),
   },
-  connectionLimit: 10, // Set the maximum number of connections in the pool
 });
 
-console.log("Database connected using Connection Pool.");
+// ฟังก์ชันสำหรับการเชื่อมต่อใหม่อัตโนมัติ
+function reconnect() {
+  pool.getConnection((err) => {
+    if (err) {
+      console.error("Error re-establishing database connection: ", err);
+      setTimeout(reconnect, 2000); // ลองเชื่อมต่อใหม่ทุก 2 วินาที
+    } else {
+      console.log("Database reconnected successfully.");
+    }
+  });
+}
 
+// ตรวจจับข้อผิดพลาดใน Pool และเชื่อมต่อใหม่อัตโนมัติ
+pool.on('error', (err) => {
+  if (err.code === 'PROTOCOL_CONNECTION_LOST' || err.code === 'ECONNRESET') {
+    console.error("Database connection lost. Reconnecting...");
+    reconnect(); // เรียกใช้ reconnect
+  } else {
+    console.error("Database error: ", err);
+    throw err;
+  }
+});
+
+// ตรวจสอบการเชื่อมต่อเริ่มต้น
+pool.getConnection((err, connection) => {
+  if (err) {
+    console.error("Error connecting to the database:", err);
+    return;
+  }
+  console.log("Connected to the database successfully!");
+  connection.release(); // ปล่อยการเชื่อมต่อกลับไปใน Pool
+});
+
+module.exports = pool; // Export pool เพื่อให้สามารถใช้งานในไฟล์อื่นๆ ได้
 // Verify Token Middleware
 const verifyToken = (req, res, next) => {
   const authHeader = req.headers["authorization"];
@@ -913,6 +948,7 @@ app.get("/posts/:id", verifyToken, (req, res) => {
         res.json({
           ...post,
           like_count: post.like_count,
+          productName: post.ProductName,
           comment_count: post.comment_count,
           update: post.updated_at,
           is_liked: post.is_liked, // เพิ่มสถานะการไลค์ของผู้ใช้ในข้อมูลโพสต์
