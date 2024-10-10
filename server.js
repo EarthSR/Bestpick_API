@@ -1934,7 +1934,7 @@ SELECT
   s.username AS sender_name,
   s.picture AS sender_picture, 
   p_owner.username AS receiver_name,
-  c.comment_text AS comment_content  -- แยกแต่ละความคิดเห็นเป็นแถวใหม่
+  c.comment_text AS comment_content  
 FROM notifications n
 LEFT JOIN users s ON n.user_id = s.id
 LEFT JOIN posts p ON n.post_id = p.id
@@ -1943,7 +1943,6 @@ LEFT JOIN comments c ON n.post_id = c.post_id AND n.action_type = 'comment'
 WHERE n.action_type IN ('comment', 'like', 'follow')
   AND p_owner.id = ?
 ORDER BY n.created_at DESC;
-
 `;
 
   // กำหนดตัวแปรใน SQL Query
@@ -1955,39 +1954,6 @@ ORDER BY n.created_at DESC;
     res.json(results);
   });
 });
-
-// API สำหรับตรวจสอบสถานะการอ่านของ Notification ตาม ID
-app.get("/api/notifications/:id/status", verifyToken, (req, res) => {
-  const { id } = req.params;
-  const userId = req.userId;
-
-  const checkReadStatusSql = `
-    SELECT 
-      id,
-      user_id,
-      post_id,
-      action_type,
-      content,
-      created_at,
-      IF(read_status = 1, true, false) AS read_status
-    FROM notifications
-    WHERE id = ? AND user_id = ?;
-  `;
-
-  pool.query(checkReadStatusSql, [id, userId], (error, results) => {
-    if (error) {
-      console.error("Database error during checking read status:", error);
-      return res.status(500).json({ error: "Error checking read status" });
-    }
-    if (results.length === 0) {
-      return res
-        .status(404)
-        .json({ message: "Notification not found or you are not the owner" });
-    }
-    res.json(results[0]);
-  });
-});
-
 
 
 
