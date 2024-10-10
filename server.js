@@ -1422,7 +1422,6 @@ app.get("/search", (req, res) => {
   );
 });
 
-// API endpoint to get user profile data
 app.get("/api/users/:userId/profile", verifyToken, (req, res) => {
   const userId = req.params.userId;
 
@@ -1438,7 +1437,7 @@ app.get("/api/users/:userId/profile", verifyToken, (req, res) => {
       u.id AS userId, 
       u.username, 
       u.picture AS profileImageUrl,
-      u.bio ,
+      u.bio,
       u.email,
       u.gender, 
       COUNT(p.id) AS post_count,
@@ -1450,6 +1449,22 @@ app.get("/api/users/:userId/profile", verifyToken, (req, res) => {
       GROUP BY u.id;
   `;
 
+  // SQL query to get user posts
+  const postSql = `
+    SELECT 
+      p.id AS post_id, 
+      p.content, 
+      p.photo_url, 
+      p.video_url, 
+      p.updated_at,
+      (SELECT COUNT(*) FROM likes WHERE post_id = p.id) AS like_count,
+      (SELECT COUNT(*) FROM comments WHERE post_id = p.id) AS comment_count
+    FROM posts p
+    WHERE p.user_id = ?
+    ORDER BY p.updated_at DESC;
+  `;
+
+  // Execute the first query to get user profile
   pool.query(sql, [userId], (error, results) => {
     if (error) {
       return res
@@ -1462,25 +1477,44 @@ app.get("/api/users/:userId/profile", verifyToken, (req, res) => {
 
     const userProfile = results[0];
 
-    // Construct the response
-    const response = {
-      userId: userProfile.userId,
-      email: userProfile.email,
-      username: userProfile.username,
-      profileImageUrl: userProfile.profileImageUrl,
-      followerCount: userProfile.follower_count,
-      followingCount: userProfile.following_count,
-      postCount: userProfile.post_count,
-      gender: userProfile.gender,
-      bio: userProfile.bio,
-    };
+    // Execute the second query to get user's posts
+    pool.query(postSql, [userId], (postError, postResults) => {
+      if (postError) {
+        return res
+          .status(500)
+          .json({ error: "Database error while fetching user posts" });
+      }
 
-    // Send the response
-    res.json(response);
+      // Construct the response
+      const response = {
+        userId: userProfile.userId,
+        email: userProfile.email,
+        username: userProfile.username,
+        profileImageUrl: userProfile.profileImageUrl,
+        followerCount: userProfile.follower_count,
+        followingCount: userProfile.following_count,
+        postCount: userProfile.post_count,
+        gender: userProfile.gender,
+        bio: userProfile.bio,
+        posts: postResults.map(post => ({
+          post_id: post.post_id,
+          content: post.content,
+          photoUrl: post.photo_url,
+          videoUrl: post.video_url,
+          updatedAt: post.updated_at,
+          likeCount: post.like_count,
+          commentCount: post.comment_count
+        }))
+      };
+
+      // Send the response
+      res.json(response);
+    });
   });
 });
 
-// GET /api/users/:userId/view-profile - ดูโปรไฟล์ของผู้ใช้คนอื่น
+
+// ดูโปรไฟล์
 app.get("/api/users/:userId/view-profile", verifyToken, (req, res) => {
   const { userId } = req.params;
 
