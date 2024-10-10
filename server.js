@@ -1348,16 +1348,11 @@ app.get("/search", (req, res) => {
         if (post.photo_url) {
           // กรณี photo_url เป็น object เช่น ถูกดึงมาเป็น JSON object แทน string
           if (typeof post.photo_url === "object") {
-            console.log("photo_url object content:", post.photo_url);
 
             // ลองแปลงเป็นสตริง JSON
             try {
               photoUrlString = JSON.stringify(post.photo_url);
-              console.warn(
-                `photo_url is an object, converted to JSON string: ${photoUrlString}`
-              );
             } catch (e) {
-              console.error("Failed to stringify photo_url:", e);
               photoUrlString = ""; // ถ้าไม่สามารถแปลงได้ ให้เป็นค่าว่าง
             }
           } else if (Buffer.isBuffer(post.photo_url)) {
@@ -1387,7 +1382,6 @@ app.get("/search", (req, res) => {
             firstPhotoUrl = photoArray[0]; // ดึงเฉพาะรูปภาพแรกจากการแยกสตริง
           }
         } catch (e) {
-          console.error("Error parsing photo_url:", e);
           firstPhotoUrl = ""; // กรณีที่ photo_url ไม่สามารถแปลงได้ ให้เป็นค่าว่าง
         }
 
@@ -1839,8 +1833,6 @@ app.post("/posts/:postId/bookmark", verifyToken, (req, res) => {
   });
 });
 
-
-// API สำหรับสร้าง Notification ใหม่
 app.post("/api/notifications", verifyToken, (req, res) => {
   const { user_id, post_id, action_type, content } = req.body;
 
@@ -1850,57 +1842,79 @@ app.post("/api/notifications", verifyToken, (req, res) => {
       .json({ error: "Missing required fields: user_id or action_type" });
   }
 
-  // ตรวจสอบว่ามี Notification เดิมหรือไม่
-  const checkNotificationSql = `
-    SELECT id FROM notifications 
-    WHERE user_id = ? AND post_id = ? AND action_type = ?;
-  `;
-  const checkValues = [user_id, post_id || null, action_type];
+  // ตรวจสอบว่าเป็น action_type อะไร
+  if (action_type === 'comment') {
+    // สำหรับ comment ให้สร้าง Notification ใหม่ทุกครั้ง
+    const insertNotificationSql = `
+      INSERT INTO notifications (user_id, post_id, action_type, content)
+      VALUES (?, ?, ?, ?);
+    `;
+    const values = [user_id, post_id || null, action_type, content || null];
 
-  pool.query(checkNotificationSql, checkValues, (checkError, checkResults) => {
-    if (checkError) {
-      console.error("Database error during notification checking:", checkError);
-      return res.status(500).json({ error: "Error checking notification" });
-    }
-
-    // ถ้าพบ Notification เดิม
-    if (checkResults.length > 0) {
-      const existingNotificationId = checkResults[0].id;
-
-      // ถ้าเป็น `like` หรือ `follow` ซ้ำ ให้ลบ Notification เดิม
-      if (action_type === 'like' || action_type === 'follow') {
-        const deleteNotificationSql = `DELETE FROM notifications WHERE id = ?`;
-        pool.query(deleteNotificationSql, [existingNotificationId], (deleteError) => {
-          if (deleteError) {
-            console.error("Database error during notification deletion:", deleteError);
-            return res.status(500).json({ error: "Error deleting notification" });
-          }
-          return res.status(200).json({ message: `${action_type} notification removed successfully` });
-        });
-      } else {
-        return res.status(200).json({ message: "Notification already exists" });
+    pool.query(insertNotificationSql, values, (error, results) => {
+      if (error) {
+        console.error("Database error during notification creation:", error);
+        return res.status(500).json({ error: "Error creating notification" });
       }
-    } else {
-      // ถ้าไม่มี Notification เดิม ให้เพิ่ม Notification ใหม่
-      const insertNotificationSql = `
-        INSERT INTO notifications (user_id, post_id, action_type, content)
-        VALUES (?, ?, ?, ?);
-      `;
-      const values = [user_id, post_id || null, action_type, content || null];
-
-      pool.query(insertNotificationSql, values, (error, results) => {
-        if (error) {
-          console.error("Database error during notification creation:", error);
-          return res.status(500).json({ error: "Error creating notification" });
-        }
-        res.status(201).json({
-          message: "Notification created successfully",
-          notification_id: results.insertId,
-        });
+      res.status(201).json({
+        message: "Notification created successfully",
+        notification_id: results.insertId,
       });
-    }
-  });
+    });
+  } else {
+    // สำหรับ like หรือ follow ให้ตรวจสอบ Notification เดิมก่อน
+    const checkNotificationSql = `
+      SELECT id FROM notifications 
+      WHERE user_id = ? AND post_id = ? AND action_type = ?;
+    `;
+    const checkValues = [user_id, post_id || null, action_type];
+
+    pool.query(checkNotificationSql, checkValues, (checkError, checkResults) => {
+      if (checkError) {
+        console.error("Database error during notification checking:", checkError);
+        return res.status(500).json({ error: "Error checking notification" });
+      }
+
+      // ถ้าพบ Notification เดิม
+      if (checkResults.length > 0) {
+        const existingNotificationId = checkResults[0].id;
+
+        // ถ้าเป็น `like` หรือ `follow` ซ้ำ ให้ลบ Notification เดิม
+        if (action_type === 'like' || action_type === 'follow') {
+          const deleteNotificationSql = `DELETE FROM notifications WHERE id = ?`;
+          pool.query(deleteNotificationSql, [existingNotificationId], (deleteError) => {
+            if (deleteError) {
+              console.error("Database error during notification deletion:", deleteError);
+              return res.status(500).json({ error: "Error deleting notification" });
+            }
+            return res.status(200).json({ message: `${action_type} notification removed successfully` });
+          });
+        } else {
+          return res.status(200).json({ message: "Notification already exists" });
+        }
+      } else {
+        // ถ้าไม่มี Notification เดิม ให้เพิ่ม Notification ใหม่
+        const insertNotificationSql = `
+          INSERT INTO notifications (user_id, post_id, action_type, content)
+          VALUES (?, ?, ?, ?);
+        `;
+        const values = [user_id, post_id || null, action_type, content || null];
+
+        pool.query(insertNotificationSql, values, (error, results) => {
+          if (error) {
+            console.error("Database error during notification creation:", error);
+            return res.status(500).json({ error: "Error creating notification" });
+          }
+          res.status(201).json({
+            message: "Notification created successfully",
+            notification_id: results.insertId,
+          });
+        });
+      }
+    });
+  }
 });
+
 
 
 
@@ -1909,29 +1923,27 @@ app.get("/api/notifications", verifyToken, (req, res) => {
   const userId = req.userId;
 
   const fetchActionNotificationsSql = `
-  SELECT DISTINCT
-    n.id, 
-    n.user_id AS receiver_id, 
-    n.post_id, 
-    n.action_type, 
-    n.content, 
-    n.read_status,
-    n.created_at,
-    s.username AS sender_name,
-    s.picture AS sender_picture, 
-    p_owner.username AS receiver_name,
-    CASE 
-      WHEN n.action_type = 'comment' THEN c.comment_text 
-      ELSE NULL 
-    END AS comment_content
-  FROM notifications n
-  LEFT JOIN users s ON n.user_id = s.id -- ผู้ส่งการแจ้งเตือน
-  LEFT JOIN posts p ON n.post_id = p.id -- เชื่อมกับโพสต์
-  LEFT JOIN users p_owner ON p.user_id = p_owner.id -- ผู้รับการแจ้งเตือน (เจ้าของโพสต์)
-  LEFT JOIN comments c ON n.post_id = c.post_id AND n.action_type = 'comment' -- คอมเมนต์
-  WHERE n.action_type IN ('comment', 'like', 'follow')
-    AND p_owner.id = ? -- เฉพาะโพสต์ที่ผู้ใช้เป็นเจ้าของ
-  ORDER BY n.created_at DESC;
+SELECT 
+  n.id, 
+  n.user_id AS receiver_id, 
+  n.post_id, 
+  n.action_type, 
+  n.content, 
+  n.read_status,
+  n.created_at,
+  s.username AS sender_name,
+  s.picture AS sender_picture, 
+  p_owner.username AS receiver_name,
+  c.comment_text AS comment_content  -- แยกแต่ละความคิดเห็นเป็นแถวใหม่
+FROM notifications n
+LEFT JOIN users s ON n.user_id = s.id
+LEFT JOIN posts p ON n.post_id = p.id
+LEFT JOIN users p_owner ON p.user_id = p_owner.id
+LEFT JOIN comments c ON n.post_id = c.post_id AND n.action_type = 'comment'
+WHERE n.action_type IN ('comment', 'like', 'follow')
+  AND p_owner.id = ?
+ORDER BY n.created_at DESC;
+
 `;
 
   // กำหนดตัวแปรใน SQL Query
@@ -1944,15 +1956,50 @@ app.get("/api/notifications", verifyToken, (req, res) => {
   });
 });
 
+// API สำหรับตรวจสอบสถานะการอ่านของ Notification ตาม ID
+app.get("/api/notifications/:id/status", verifyToken, (req, res) => {
+  const { id } = req.params;
+  const userId = req.userId;
 
-// API สำหรับอัปเดตสถานะการอ่านของ Notification
+  const checkReadStatusSql = `
+    SELECT 
+      id,
+      user_id,
+      post_id,
+      action_type,
+      content,
+      created_at,
+      IF(read_status = 1, true, false) AS read_status
+    FROM notifications
+    WHERE id = ? AND user_id = ?;
+  `;
+
+  pool.query(checkReadStatusSql, [id, userId], (error, results) => {
+    if (error) {
+      console.error("Database error during checking read status:", error);
+      return res.status(500).json({ error: "Error checking read status" });
+    }
+    if (results.length === 0) {
+      return res
+        .status(404)
+        .json({ message: "Notification not found or you are not the owner" });
+    }
+    res.json(results[0]);
+  });
+});
+
+
+
+
+// API สำหรับทำการอ่านของ Notification ตาม ID
 app.put("/api/notifications/:id/read", verifyToken, (req, res) => {
   const { id } = req.params;
   const userId = req.userId;
 
+
   const updateReadStatusSql = `
     UPDATE notifications
-    SET read_status = TRUE
+    SET read_status = 1
     WHERE id = ? AND user_id = ?;
   `;
 
@@ -1962,13 +2009,14 @@ app.put("/api/notifications/:id/read", verifyToken, (req, res) => {
       return res.status(500).json({ error: "Error updating read status" });
     }
     if (results.affectedRows === 0) {
-      return res
-        .status(404)
-        .json({ message: "Notification not found or you are not the owner" });
+      return res.status(404).json({ message: "Notification not found or you are not the owner" });
     }
     res.json({ message: "Notification marked as read" });
   });
 });
+
+
+
 
 // API สำหรับลบ Notification
 app.delete("/api/notifications", verifyToken, (req, res) => {
