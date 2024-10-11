@@ -240,7 +240,7 @@ app.post("/register/set-password", async (req, res) => {
     const { email, password } = req.body;
     const hash = await bcrypt.hash(password, 10);
 
-    const sql = "INSERT INTO users (email, password) VALUES (?, ?)";
+    const sql = "INSERT INTO users (email, password, status, role) VALUES (?, ?, 'active', 'user')";
     pool.query(sql, [email, hash], (err) => {
       if (err) throw new Error("Database error during registration");
 
@@ -450,7 +450,7 @@ app.post("/login", async (req, res) => {
     const ipAddress =
       req.headers["x-forwarded-for"] || req.connection.remoteAddress;
 
-    const sql = "SELECT * FROM users WHERE email = ?";
+    const sql = "SELECT * FROM users WHERE email = ? AND status = 'active'";
     pool.query(sql, [email], (err, results) => {
       if (err) throw new Error("Database error during login");
       if (results.length === 0) {
@@ -575,11 +575,13 @@ app.post("/google-signin", async (req, res) => {
   try {
     const { googleId, email } = req.body;
 
+    // ตรวจสอบว่ามีการส่ง Google ID และ Email เข้ามาหรือไม่
     if (!googleId || !email) {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
-    const checkGoogleIdSql = "SELECT * FROM users WHERE google_id = ?";
+    // ค้นหาผู้ใช้ที่มี google_id และ status = 'active'
+    const checkGoogleIdSql = "SELECT * FROM users WHERE google_id = ? AND status = 'active'";
     pool.query(checkGoogleIdSql, [googleId], (err, googleIdResults) => {
       if (err) throw new Error("Database error during Google ID check");
 
@@ -599,20 +601,25 @@ app.post("/google-signin", async (req, res) => {
               picture: user.picture,
               username: user.username,
               google_id: user.google_id,
+              role: user.role, // เพิ่มบทบาท
+              status: user.status, // เพิ่มสถานะ
             },
           });
         });
       } else {
+        // ตรวจสอบว่ามี email นี้ในฐานข้อมูลหรือไม่
         const checkEmailSql = "SELECT * FROM users WHERE email = ?";
         pool.query(checkEmailSql, [email], (err, emailResults) => {
           if (err) throw new Error("Database error during email check");
-          if (emailResults.length > 0)
-            return res
-              .status(409)
-              .json({ error: "Email already registered with another account" });
+          if (emailResults.length > 0) {
+            return res.status(409).json({
+              error: "Email already registered with another account",
+            });
+          }
 
+          // หากไม่มีผู้ใช้ในระบบ ให้สร้างผู้ใช้ใหม่ด้วย Google ID, email, status และ role
           const insertSql =
-            'INSERT INTO users (google_id, email, username) VALUES (?, ?, "")';
+            'INSERT INTO users (google_id, email, username, status, role) VALUES (?, ?, "", "active", "user")';
           pool.query(insertSql, [googleId, email], (err, result) => {
             if (err) throw new Error("Database error during user insertion");
 
@@ -633,6 +640,8 @@ app.post("/google-signin", async (req, res) => {
                   picture: newUser.picture,
                   username: newUser.username,
                   google_id: newUser.google_id,
+                  role: newUser.role, // เพิ่มบทบาท
+                  status: newUser.status, // เพิ่มสถานะ
                 },
               });
             });
@@ -645,6 +654,7 @@ app.post("/google-signin", async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 });
+
 
 // POST /api/interactions - บันทึกการโต้ตอบใหม่
 app.post("/api/interactions", verifyToken, async (req, res) => {
@@ -2122,6 +2132,21 @@ app.get("/api/bookmarks", verifyToken, (req, res) => {
     res.json(results);
   });
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
