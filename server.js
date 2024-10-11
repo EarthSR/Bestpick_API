@@ -23,6 +23,7 @@ app.use(cors()); // Enable CORS
 // Initialize Firebase Admin SDK
 const serviceAccount = require("./config/apilogin-6efd6-firebase-adminsdk-b3l6z-c2e5fe541a.json");
 const { title } = require("process");
+const { error } = require("console");
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
 });
@@ -94,6 +95,7 @@ const verifyToken = (req, res, next) => {
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
     req.userId = decoded.id; // Store the user ID for later use
+    req.role = decoded.role; // Store the role for later use
     next(); // Proceed to the next middleware or route handler
   } catch (err) {
     return res.status(401).json({ error: "Unauthorized: Invalid token" });
@@ -511,7 +513,7 @@ app.post("/login", async (req, res) => {
             );
 
           // Generate JWT token
-          const token = jwt.sign({ id: user.id }, JWT_SECRET);
+          const token = jwt.sign({ id: user.id,role: user.role }, JWT_SECRET);
 
           // Return successful login response with token and user data
           res.status(200).json({
@@ -607,7 +609,7 @@ app.post("/google-signin", async (req, res) => {
         pool.query(updateSql, [email, googleId], (err) => {
           if (err) throw new Error("Database error during user update");
 
-          const token = jwt.sign({ id: user.id }, JWT_SECRET);
+          const token = jwt.sign({ id: user.id,role: user.role }, JWT_SECRET);
           return res.json({
             message: "User information updated successfully",
             token,
@@ -645,7 +647,7 @@ app.post("/google-signin", async (req, res) => {
               if (err) throw new Error("Database error during new user fetch");
 
               const newUser = newUserResults[0];
-              const token = jwt.sign({ id: newUser.id }, JWT_SECRET);
+              const token = jwt.sign({ id: user.id,role: user.role }, JWT_SECRET);
 
               return res.status(201).json({
                 message: "User registered and authenticated successfully",
@@ -882,6 +884,7 @@ app.get("/posts", verifyToken, (req, res) => {
       (SELECT COUNT(*) FROM likes WHERE post_id = posts.id AND user_id = ?) AS is_liked
       FROM posts 
       JOIN users ON posts.user_id = users.id
+      WHERE posts.status = 'active' 
     `;
 
     pool.query(query, [userId], (err, results) => {
@@ -921,6 +924,36 @@ app.get("/posts", verifyToken, (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 });
+
+//update status posts
+app.put("/posts/:id/status", verifyToken, (req, res) => {
+  const postId = req.params.id;
+  const roles = req.role;
+
+  // ตรวจสอบบทบาท (role) และหยุดการทำงานถ้าบทบาทไม่ถูกต้อง
+  if (roles !== "admin") {
+    return res.status(403).json({ error: "You do not have permission to update status." });
+  }
+
+  // รับค่า status ที่จะอัปเดตมาจาก Body
+  const { status } = req.body;
+
+  const query = "UPDATE posts SET status = ? WHERE id = ?";
+  pool.query(query, [status, postId], (err, results) => {
+    if (err) {
+      console.error("Database error during post status update:", err);
+      return res.status(500).json({ error: "Internal server error" });
+    }
+
+    // ตรวจสอบว่ามีการอัปเดตข้อมูลหรือไม่
+    if (results.affectedRows === 0) {
+      return res.status(404).json({ error: "Post not found or status not changed." });
+    }
+
+    res.json({ message: "Post status updated successfully." });
+  });
+});
+
 
 // View a Single Post with Like and Comment Count and Show Comments
 app.get("/posts/:id", verifyToken, (req, res) => {
