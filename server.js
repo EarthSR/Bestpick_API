@@ -35,14 +35,16 @@ const pool = mysql.createPool({
   database: process.env.DB_NAME,
   port: process.env.DB_PORT,
   waitForConnections: true,
-  connectionLimit: 20, // เพิ่มจำนวนการเชื่อมต่อสูงสุดใน Pool
+  connectionLimit: 20,
   queueLimit: 0,
-  connectTimeout: 60000, // ปรับเป็น 60 วินาที
-  acquireTimeout: 60000, // ปรับเป็น 60 วินาที
+  connectTimeout: 60000,
+  acquireTimeout: 60000,
   ssl: {
-    ca: fs.readFileSync("./certs/isrgrootx1.pem"),
+    rejectUnauthorized: true, // กำหนดว่าเซิร์ฟเวอร์ต้องมีใบรับรองที่น่าเชื่อถือ
+    ca: fs.readFileSync("./certs/isrgrootx1.pem"), // เพิ่มไฟล์ใบรับรอง
   },
 });
+
 
 // ฟังก์ชันสำหรับการเชื่อมต่อใหม่อัตโนมัติ
 function reconnect() {
