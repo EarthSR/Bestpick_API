@@ -240,7 +240,7 @@ app.post("/register/set-password", async (req, res) => {
     const { email, password } = req.body;
     const hash = await bcrypt.hash(password, 10);
 
-    const sql = "INSERT INTO users (email, password, status, role) VALUES (?, ?, 'active', 'user')";
+    const sql = "INSERT INTO users (email, password, status, role, username) VALUES (?, ?, 'active', 'user', '')";
     pool.query(sql, [email, hash], (err) => {
       if (err) throw new Error("Database error during registration");
 
@@ -535,40 +535,56 @@ app.post("/login", async (req, res) => {
   }
 });
 
-//set username
-app.post("/set-username", verifyToken, (req, res) => {
-  const { newUsername } = req.body;
-  const userId = req.userId; // Use the user ID extracted from the token
+app.post("/set-profile", verifyToken, (req, res) => {
+  const { newUsername, picture, birthday } = req.body;
+  const userId = req.userId; // ใช้ user ID จาก token ที่ได้รับการตรวจสอบแล้ว
 
-  // Ensure that the new username is provided
-  if (!newUsername) {
-    return res.status(400).json({ message: "New username is required" });
+  // ตรวจสอบว่าข้อมูลโปรไฟล์จำเป็นถูกส่งมาครบหรือไม่
+  if (!newUsername || !picture || !birthday) {
+    return res.status(400).json({ message: "New username, picture, and birthday are required" });
   }
 
-  // Check if the username is already taken
-  const checkUsernameQuery = "SELECT * FROM users WHERE username = ?";
-  pool.query(checkUsernameQuery, [newUsername], (err, results) => {
+  // ตรวจสอบว่ามีการตั้งค่าข้อมูลแล้วหรือไม่
+  const checkProfileQuery = "SELECT username, picture, birthday FROM users WHERE id = ?";
+  pool.query(checkProfileQuery, [userId], (err, results) => {
     if (err) {
-      return res
-        .status(500)
-        .json({ message: "Database error checking username" });
+      return res.status(500).json({ message: "Database error checking profile" });
     }
 
+    // ถ้าผลลัพธ์มีข้อมูลอยู่แสดงว่าผู้ใช้มีการตั้งค่ามาแล้ว
     if (results.length > 0) {
-      return res.status(400).json({ message: "Username already taken" });
+      const { username, picture: existingPicture, birthday: existingBirthday } = results[0];
+      
+      // ตรวจสอบว่ามีข้อมูลเดิมอยู่ในฐานข้อมูลหรือไม่
+      if (username || existingPicture || existingBirthday) {
+        return res.status(400).json({ message: "Profile has already been set. You can only update it in the profile settings." });
+      }
     }
 
-    // Update the user's username
-    const updateUsernameQuery = "UPDATE users SET username = ? WHERE id = ?";
-    pool.query(updateUsernameQuery, [newUsername, userId], (err) => {
+    // ตรวจสอบว่ามีผู้ใช้คนอื่นใช้ username นี้แล้วหรือไม่
+    const checkUsernameQuery = "SELECT * FROM users WHERE username = ?";
+    pool.query(checkUsernameQuery, [newUsername], (err, results) => {
       if (err) {
-        return res.status(500).json({ message: "Error updating username" });
+        return res.status(500).json({ message: "Database error checking username" });
       }
 
-      return res.status(200).json({ message: "Username set successfully" });
+      if (results.length > 0) {
+        return res.status(400).json({ message: "Username already taken" });
+      }
+
+      // อัปเดตข้อมูล username, picture, และ birthday สำหรับผู้ใช้ใหม่
+      const updateProfileQuery = "UPDATE users SET username = ?, picture = ?, birthday = ? WHERE id = ?";
+      pool.query(updateProfileQuery, [newUsername, picture, birthday, userId], (err) => {
+        if (err) {
+          return res.status(500).json({ message: "Error updating profile" });
+        }
+
+        return res.status(200).json({ message: "Profile set successfully for the first time" });
+      });
     });
   });
 });
+
 
 // Google Sign-In
 app.post("/google-signin", async (req, res) => {
