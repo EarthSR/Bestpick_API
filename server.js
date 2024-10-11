@@ -2045,6 +2045,86 @@ app.delete("/api/notifications", verifyToken, (req, res) => {
 });
 
 
+// API สำหรับเพิ่มบุ๊คมาร์ค
+app.post("/api/bookmarks", verifyToken, (req, res) => {
+  const { post_id } = req.body; // ดึง post_id จาก request body
+  const user_id = req.userId; // ดึง user_id จาก Token ที่ผ่านการตรวจสอบแล้ว
+
+  // ตรวจสอบว่ามี post_id ที่ต้องการบุ๊คมาร์คหรือไม่
+  if (!post_id) {
+    return res.status(400).json({ error: "Post ID is required" });
+  }
+
+  // เพิ่มข้อมูลบุ๊คมาร์คในฐานข้อมูล
+  const addBookmarkSql = "INSERT INTO bookmarks (user_id, post_id) VALUES (?, ?)";
+  pool.query(addBookmarkSql, [user_id, post_id], (err, results) => {
+    if (err) {
+      console.error("Database error during adding bookmark:", err);
+      return res.status(500).json({ error: "Error adding bookmark" });
+    }
+
+    res.status(201).json({ message: "Post bookmarked successfully" });
+  });
+});
+
+// API สำหรับลบบุ๊คมาร์ค
+app.delete("/api/bookmarks", verifyToken, (req, res) => {
+  const { post_id } = req.body; // ดึง post_id จาก request body
+  const user_id = req.userId; // ดึง user_id จาก Token ที่ผ่านการตรวจสอบแล้ว
+
+  // ตรวจสอบว่ามี post_id ที่ต้องการลบหรือไม่
+  if (!post_id) {
+    return res.status(400).json({ error: "Post ID is required" });
+  }
+
+  // ลบข้อมูลบุ๊คมาร์คจากฐานข้อมูล
+  const deleteBookmarkSql = "DELETE FROM bookmarks WHERE user_id = ? AND post_id = ?";
+  pool.query(deleteBookmarkSql, [user_id, post_id], (err, results) => {
+    if (err) {
+      console.error("Database error during deleting bookmark:", err);
+      return res.status(500).json({ error: "Error deleting bookmark" });
+    }
+
+    if (results.affectedRows === 0) {
+      return res.status(404).json({ message: "Bookmark not found or you are not authorized to delete" });
+    }
+
+    res.json({ message: "Bookmark deleted successfully" });
+  });
+});
+
+// API สำหรับดึงรายการบุ๊คมาร์คของผู้ใช้
+app.get("/api/bookmarks", verifyToken, (req, res) => {
+  const user_id = req.userId; // ดึง user_id จาก Token ที่ผ่านการตรวจสอบแล้ว
+
+  // ดึงรายการบุ๊คมาร์คจากฐานข้อมูล
+  const fetchBookmarksSql = `
+    SELECT 
+      b.post_id, 
+      p.title, 
+      p.content, 
+      p.photo_url, 
+      p.video_url, 
+      u.username AS author 
+    FROM bookmarks b
+    JOIN posts p ON b.post_id = p.id
+    JOIN users u ON p.user_id = u.id
+    WHERE b.user_id = ?
+    ORDER BY b.created_at DESC;
+  `;
+
+  pool.query(fetchBookmarksSql, [user_id], (err, results) => {
+    if (err) {
+      console.error("Database error during fetching bookmarks:", err);
+      return res.status(500).json({ error: "Error fetching bookmarks" });
+    }
+
+    res.json(results);
+  });
+});
+
+
+
 // Start the server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
