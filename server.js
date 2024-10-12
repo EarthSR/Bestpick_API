@@ -102,6 +102,37 @@ const verifyToken = (req, res, next) => {
   }
 };
 
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const dir = "uploads/";
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir);
+    }
+    cb(null, dir);
+  },
+  filename: (req, file, cb) => {
+    const uniqueName = crypto.randomBytes(16).toString("hex");
+    const fileExtension = path.extname(file.originalname); // ดึงนามสกุลไฟล์ เช่น .jpg, .png
+    const originalName = path.basename(file.originalname, fileExtension); // ดึงชื่อไฟล์ต้นฉบับ
+    const timestamp = Date.now(); // เวลาปัจจุบันในหน่วย milliseconds
+
+    // ตั้งชื่อไฟล์ใหม่ด้วย timestamp, original name, unique hash และ extension
+    const newFileName = `${timestamp}_${originalName}_${uniqueName}${fileExtension}`;
+
+    // แสดงชื่อไฟล์ใน console log เพื่อตรวจสอบ
+    console.log(`File saved as: ${newFileName}`);
+
+    cb(null, newFileName); // บันทึกชื่อไฟล์
+  },
+});
+
+const upload = multer({
+  storage: storage, // เปลี่ยนจาก dest เป็น storage ที่เราสร้างไว้
+  limits: {
+    fileSize: 10 * 1024 * 1024, // จำกัดขนาดไฟล์ที่อัปโหลด (10MB)
+  },
+});
+
 // Generate OTP
 function generateOtp() {
   const otp = crypto.randomBytes(3).toString("hex"); // 3 bytes = 6 hex characters
@@ -537,55 +568,45 @@ app.post("/login", async (req, res) => {
   }
 });
 
-app.post("/set-profile", verifyToken, (req, res) => {
-  const { newUsername, picture, birthday } = req.body;
-  const userId = req.userId; // ใช้ user ID จาก token ที่ได้รับการตรวจสอบแล้ว
+// Set profile route (Profile setup or update)
+app.post("/set-profile", verifyToken, upload.single('picture'), (req, res) => {
+  const { newUsername, birthday } = req.body;
+  const userId = req.userId;
+  const picture = req.file ? `/uploads/${req.file.filename}` : null; 
 
-  // ตรวจสอบว่าข้อมูลโปรไฟล์จำเป็นถูกส่งมาครบหรือไม่
   if (!newUsername || !picture || !birthday) {
     return res.status(400).json({ message: "New username, picture, and birthday are required" });
   }
 
-  // ตรวจสอบว่ามีการตั้งค่าข้อมูลแล้วหรือไม่
-  const checkProfileQuery = "SELECT username, picture, birthday FROM users WHERE id = ?";
-  pool.query(checkProfileQuery, [userId], (err, results) => {
+  // Convert birthday from DD/MM/YYYY to YYYY-MM-DD
+  const birthdayParts = birthday.split('/');
+  const formattedBirthday = `${birthdayParts[2]}-${birthdayParts[1]}-${birthdayParts[0]}`;
+
+  // Check if the new username is already taken
+  const checkUsernameQuery = "SELECT * FROM users WHERE username = ?";
+  pool.query(checkUsernameQuery, [newUsername], (err, results) => {
     if (err) {
-      return res.status(500).json({ message: "Database error checking profile" });
+      console.error("Error checking username: ", err);
+      return res.status(500).json({ message: "Database error checking username" });
     }
 
-    // ถ้าผลลัพธ์มีข้อมูลอยู่แสดงว่าผู้ใช้มีการตั้งค่ามาแล้ว
     if (results.length > 0) {
-      const { username, picture: existingPicture, birthday: existingBirthday } = results[0];
-      
-      // ตรวจสอบว่ามีข้อมูลเดิมอยู่ในฐานข้อมูลหรือไม่
-      if (username || existingPicture || existingBirthday) {
-        return res.status(400).json({ message: "Profile has already been set. You can only update it in the profile settings." });
-      }
+      return res.status(400).json({ message: "Username already taken" });
     }
 
-    // ตรวจสอบว่ามีผู้ใช้คนอื่นใช้ username นี้แล้วหรือไม่
-    const checkUsernameQuery = "SELECT * FROM users WHERE username = ?";
-    pool.query(checkUsernameQuery, [newUsername], (err, results) => {
+    // Update the profile with the new username, picture (with '/uploads/'), and birthday (formatted)
+    const updateProfileQuery = "UPDATE users SET username = ?, picture = ?, birthday = ? WHERE id = ?";
+    pool.query(updateProfileQuery, [newUsername, picture, formattedBirthday, userId], (err) => {
       if (err) {
-        return res.status(500).json({ message: "Database error checking username" });
+        console.error("Error updating profile: ", err);
+        return res.status(500).json({ message: "Error updating profile" });
       }
 
-      if (results.length > 0) {
-        return res.status(400).json({ message: "Username already taken" });
-      }
-
-      // อัปเดตข้อมูล username, picture, และ birthday สำหรับผู้ใช้ใหม่
-      const updateProfileQuery = "UPDATE users SET username = ?, picture = ?, birthday = ? WHERE id = ?";
-      pool.query(updateProfileQuery, [newUsername, picture, birthday, userId], (err) => {
-        if (err) {
-          return res.status(500).json({ message: "Error updating profile" });
-        }
-
-        return res.status(200).json({ message: "Profile set successfully for the first time" });
-      });
+      return res.status(200).json({ message: "Profile set/updated successfully" });
     });
   });
 });
+
 
 
 // Google Sign-In
@@ -1030,36 +1051,8 @@ app.get("/posts/:id", verifyToken, (req, res) => {
   }
 });
 
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    const dir = "uploads/";
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir);
-    }
-    cb(null, dir);
-  },
-  filename: (req, file, cb) => {
-    const uniqueName = crypto.randomBytes(16).toString("hex");
-    const fileExtension = path.extname(file.originalname); // ดึงนามสกุลไฟล์ เช่น .jpg, .png
-    const originalName = path.basename(file.originalname, fileExtension); // ดึงชื่อไฟล์ต้นฉบับ
-    const timestamp = Date.now(); // เวลาปัจจุบันในหน่วย milliseconds
 
-    // ตั้งชื่อไฟล์ใหม่ด้วย timestamp, original name, unique hash และ extension
-    const newFileName = `${timestamp}_${originalName}_${uniqueName}${fileExtension}`;
 
-    // แสดงชื่อไฟล์ใน console log เพื่อตรวจสอบ
-    console.log(`File saved as: ${newFileName}`);
-
-    cb(null, newFileName); // บันทึกชื่อไฟล์
-  },
-});
-
-const upload = multer({
-  storage: storage, // เปลี่ยนจาก dest เป็น storage ที่เราสร้างไว้
-  limits: {
-    fileSize: 10 * 1024 * 1024, // จำกัดขนาดไฟล์ที่อัปโหลด (10MB)
-  },
-});
 
 // Create a Post
 app.post(
