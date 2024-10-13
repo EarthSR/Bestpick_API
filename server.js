@@ -1800,58 +1800,47 @@ app.post("/api/users/:userId/follow/:followingId", verifyToken, (req, res) => {
   });
 });
 
+
 // API endpoint to check follow status of a user
-app.get(
-  "/api/users/:userId/follow/:followingId/status",
-  verifyToken,
-  (req, res) => {
-    const userId = req.params.userId;
-    const followingId = req.params.followingId;
+app.get("/api/users/:userId/follow/:followingId/status", verifyToken, (req, res) => {
+  const userId = req.params.userId;
+  const followingId = req.params.followingId;
 
-    // Ensure that the user making the request is the same as the one being checked
-    if (req.userId.toString() !== userId) {
+  // Ensure that the user making the request is the same as the one being checked
+  if (req.userId.toString() !== userId) {
       return res
-        .status(403)
-        .json({
-          error: "You are not authorized to check follow status for this user",
-        });
-    }
+          .status(403)
+          .json({ error: "You are not authorized to check follow status for this user" });
+  }
 
-    // Check if the following user exists
-    const checkFollowingSql = "SELECT * FROM users WHERE id = ?";
-    pool.query(checkFollowingSql, [followingId], (error, followingResults) => {
+  // Check if the following user exists
+  const checkFollowingSql = "SELECT * FROM users WHERE id = ?";
+  pool.query(checkFollowingSql, [followingId], (error, followingResults) => {
       if (error) {
-        return res
-          .status(500)
-          .json({ error: "Database error while checking following user" });
+          return res.status(500).json({ error: "Database error while checking following user" });
       }
       if (followingResults.length === 0) {
-        return res
-          .status(404)
-          .json({ error: "User to check follow status not found" });
+          return res.status(404).json({ error: "User to check follow status not found" });
       }
 
       // Check if the user is already following the other user
-      const checkFollowSql =
-        "SELECT * FROM follower_following WHERE follower_id = ? AND following_id = ?";
+      const checkFollowSql = "SELECT * FROM follower_following WHERE follower_id = ? AND following_id = ?";
       pool.query(
-        checkFollowSql,
-        [userId, followingId],
-        (error, followResults) => {
-          if (error) {
-            return res
-              .status(500)
-              .json({ error: "Database error while checking follow status" });
-          }
+          checkFollowSql,
+          [userId, followingId],
+          (error, followResults) => {
+              if (error) {
+                  return res.status(500).json({ error: "Database error while checking follow status" });
+              }
 
-          // If the user is following, return true, else return false
-          const isFollowing = followResults.length > 0;
-          return res.status(200).json({ isFollowing });
-        }
+              // If the user is following, return true, else return false
+              const isFollowing = followResults.length > 0;
+              return res.status(200).json({ isFollowing });
+          }
       );
-    });
-  }
-);
+  });
+});
+
 
 // api comment
 app.post("/posts/:postId/comment", verifyToken, (req, res) => {
@@ -1920,6 +1909,100 @@ app.post("/posts/:postId/bookmark", verifyToken, (req, res) => {
     res.status(201).json({ message: "Post added to bookmarks successfully" });
   });
 });
+
+// API for fetching user's bookmarked posts
+app.get("/api/bookmarks", verifyToken, (req, res) => {
+  const user_id = req.userId; // Get user_id from token
+
+  // SQL query to fetch bookmarked posts with like and comment counts and follow status
+  const fetchBookmarksSql = `
+    SELECT 
+      p.id AS post_id, 
+      p.content, 
+      p.photo_url, 
+      p.video_url, 
+      p.updated_at,
+      (SELECT COUNT(*) FROM likes WHERE post_id = p.id) AS like_count,
+      (SELECT COUNT(*) FROM comments WHERE post_id = p.id) AS comment_count,
+      u.id AS user_id, 
+      u.username AS author_username, 
+      u.picture AS author_profile_image,
+      CASE 
+        WHEN (SELECT COUNT(*) 
+              FROM follower_following 
+              WHERE follower_id = ? AND following_id = u.id) > 0 
+        THEN TRUE ELSE FALSE 
+      END AS is_following 
+    FROM bookmarks b
+    JOIN posts p ON b.post_id = p.id
+    JOIN users u ON p.user_id = u.id
+    WHERE b.user_id = ?
+    ORDER BY b.created_at DESC;
+  `;
+
+  pool.query(fetchBookmarksSql, [user_id, user_id], (err, results) => {
+    if (err) {
+      console.error("Database error during fetching bookmarks:", err);
+      return res.status(500).json({ error: "Error fetching bookmarks" });
+    }
+
+    if (results.length === 0) {
+      return res.status(404).json({ message: "No bookmarks found." });
+    }
+
+    // Process photo_url and video_url as JSON arrays and format the response
+    const formattedBookmarks = results.map((post) => {
+      let photos = [];
+      let videos = [];
+
+      // Handle photo_url (if it's a JSON string, parse it into an array)
+      if (typeof post.photo_url === "string") {
+        try {
+          photos = JSON.parse(post.photo_url);
+        } catch (e) {
+          console.error("Error parsing photo_url:", e.message);
+        }
+      } else if (Array.isArray(post.photo_url)) {
+        photos = post.photo_url;
+      }
+
+      // Handle video_url (if it's a JSON string, parse it into an array)
+      if (typeof post.video_url === "string") {
+        try {
+          videos = JSON.parse(post.video_url);
+        } catch (e) {
+          console.error("Error parsing video_url:", e.message);
+        }
+      } else if (Array.isArray(post.video_url)) {
+        videos = post.video_url;
+      }
+
+      return {
+        post_id: post.post_id,
+        content: post.content,
+        created_at: post.updated_at,
+        like_count: post.like_count,
+        comment_count: post.comment_count,
+        photos, // formatted photos array
+        videos, // formatted videos array
+        author: {
+          user_id: post.user_id,
+          username: post.author_username,
+          profile_image: post.author_profile_image,
+        },
+        is_following: post.is_following === 1, // Convert 1 to true and 0 to false
+      };
+    });
+
+    // Return the formatted bookmarks
+    res.json({ bookmarks: formattedBookmarks });
+  });
+});
+
+
+
+
+
 
 app.post("/api/notifications", verifyToken, (req, res) => {
   const { user_id, post_id, action_type, content } = req.body;
