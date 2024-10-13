@@ -1064,7 +1064,7 @@ app.post(
   ]),
   (req, res) => {
     try {
-      const { user_id, content, category, Title, ProductNumber } = req.body; // รับค่า ProductNumber เป็น String จาก req.body
+      const { user_id, content, category, Title, ProductName } = req.body; 
       let photo_urls = [];
       let video_urls = [];
 
@@ -1089,10 +1089,10 @@ app.post(
       const video_urls_json = JSON.stringify(video_urls);
 
       const query =
-        "INSERT INTO posts (user_id, content, video_url, photo_url, category, Title, ProductNumber) VALUES (?, ?, ?, ?, ?, ?, ?)";
+        "INSERT INTO posts (user_id, content, video_url, photo_url, category, Title, ProductName) VALUES (?, ?, ?, ?, ?, ?, ?)";
       pool.query(
         query,
-        [user_id, content, video_urls_json, photo_urls_json, category, Title, ProductNumber],
+        [user_id, content, video_urls_json, photo_urls_json, category, Title, ProductName],
         (err, results) => {
           if (err) {
             console.error("Database error during post creation:", err);
@@ -1104,7 +1104,7 @@ app.post(
             content,
             category,
             Title,
-            ProductNumber, // ส่งค่ากลับไปเพื่อแสดงผล
+            ProductName, // ส่งค่ากลับไปเพื่อแสดงผล
             video_urls,
             photo_urls,
           });
@@ -1886,29 +1886,49 @@ app.post("/posts/:postId/comment", verifyToken, (req, res) => {
   }
 });
 
-// API to Add a Post to Bookmark
-app.post("/posts/:postId/bookmark", verifyToken, (req, res) => {
-  const { postId } = req.params; // ดึง postId จากพารามิเตอร์
-  const userId = req.userId; // ดึง userId จาก Token ที่ผ่านการตรวจสอบแล้ว
 
-  // ตรวจสอบว่า postId ไม่ว่างเปล่า
+app.post("/posts/:postId/bookmark", verifyToken, (req, res) => {
+  const { postId } = req.params; // Extract postId from URL parameters
+  const userId = req.userId; // Extract userId from the verified token
+
+  // Check if postId is provided
   if (!postId) {
     return res.status(400).json({ error: "Post ID is required" });
   }
 
-  // SQL Query เพื่อเพิ่ม post เข้าไปในตาราง bookmark ของผู้ใช้
-  const addBookmarkSql =
-    "INSERT INTO bookmarks (user_id, post_id) VALUES (?, ?);";
+  // SQL Query to check if the post is already bookmarked by the user
+  const checkBookmarkSql = "SELECT * FROM bookmarks WHERE user_id = ? AND post_id = ?";
 
-  pool.query(addBookmarkSql, [userId, postId], (err, results) => {
+  pool.query(checkBookmarkSql, [userId, postId], (err, results) => {
     if (err) {
-      console.error("Database error during adding to bookmark:", err);
-      return res.status(500).json({ error: "Error adding post to bookmarks" });
+      console.error("Database error during checking bookmark status:", err);
+      return res.status(500).json({ error: "Error checking bookmark status" });
     }
 
-    res.status(201).json({ message: "Post added to bookmarks successfully" });
+    if (results.length > 0) {
+      // If the post is already bookmarked, remove it (unbookmark)
+      const removeBookmarkSql = "DELETE FROM bookmarks WHERE user_id = ? AND post_id = ?";
+      pool.query(removeBookmarkSql, [userId, postId], (err, deleteResults) => {
+        if (err) {
+          console.error("Database error during removing bookmark:", err);
+          return res.status(500).json({ error: "Error removing bookmark" });
+        }
+        return res.status(200).json({ message: "Post removed from bookmarks successfully" });
+      });
+    } else {
+      // If the post is not bookmarked, add it
+      const addBookmarkSql = "INSERT INTO bookmarks (user_id, post_id) VALUES (?, ?)";
+      pool.query(addBookmarkSql, [userId, postId], (err, insertResults) => {
+        if (err) {
+          console.error("Database error during adding bookmark:", err);
+          return res.status(500).json({ error: "Error adding post to bookmarks" });
+        }
+        return res.status(201).json({ message: "Post added to bookmarks successfully" });
+      });
+    }
   });
 });
+
 
 // API for fetching user's bookmarked posts
 app.get("/api/bookmarks", verifyToken, (req, res) => {
@@ -2258,21 +2278,24 @@ app.get("/api/bookmarks", verifyToken, (req, res) => {
   });
 });
 
+app.get("/posts/:postId/bookmark/status", verifyToken, (req, res) => {
+  const { postId } = req.params; // Extract postId from URL parameters
+  const userId = req.userId; // Extract userId from the verified token
 
+  // SQL Query to check if the post is already bookmarked by the user
+  const checkBookmarkSql = "SELECT * FROM bookmarks WHERE user_id = ? AND post_id = ?";
 
+  pool.query(checkBookmarkSql, [userId, postId], (err, results) => {
+    if (err) {
+      console.error("Database error during checking bookmark status:", err);
+      return res.status(500).json({ error: "Error checking bookmark status" });
+    }
 
-
-
-
-
-
-
-
-
-
-
-
-
+    // If results are found, post is bookmarked, otherwise it is not
+    const isBookmarked = results.length > 0;
+    res.status(200).json({ isBookmarked });
+  });
+});
 
 
 // Start the server
