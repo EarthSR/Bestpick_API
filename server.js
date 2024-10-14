@@ -1089,7 +1089,7 @@ app.post(
       const video_urls_json = JSON.stringify(video_urls);
 
       const query =
-        "INSERT INTO posts (user_id, content, video_url, photo_url, category, Title, ProductName) VALUES (?, ?, ?, ?, ?, ?, ?)";
+        "INSERT INTO posts (user_id, content, video_url, photo_url, CategoryID, Title, ProductName) VALUES (?, ?, ?, ?, ?, ?, ?)";
       pool.query(
         query,
         [user_id, content, video_urls_json, photo_urls_json, category, Title, ProductName],
@@ -1233,7 +1233,29 @@ app.delete("/posts/:id", verifyToken, (req, res) => {
 });
 
 
+app.get("/type", verifyToken, (req, res) => {
+  const sqlQuery = "SELECT * FROM category";
 
+  // Get a connection from the pool and query the database
+  pool.getConnection((err, connection) => {
+    if (err) {
+      return res.status(500).json({ error: "Error connecting to the database" });
+    }
+
+    // Execute the query
+    connection.query(sqlQuery, (err, result) => {
+      // Release the connection back to the pool after query execution
+      connection.release();
+
+      if (err) {
+        return res.status(500).json({ error: "Database query failed" });
+      }
+
+      // Send back the results
+      res.json(result);
+    });
+  });
+});
 
 
 
