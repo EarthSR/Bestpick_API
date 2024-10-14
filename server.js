@@ -1493,6 +1493,7 @@ app.get("/api/users/:userId/profile", verifyToken, (req, res) => {
       u.picture AS profileImageUrl,
       u.bio,
       u.email,
+      u.birthday,
       u.gender, 
       COUNT(p.id) AS post_count,
       (SELECT COUNT(*) FROM follower_following WHERE following_id = u.id) AS follower_count, 
@@ -1544,6 +1545,7 @@ app.get("/api/users/:userId/profile", verifyToken, (req, res) => {
         userId: userProfile.userId,
         email: userProfile.email,
         username: userProfile.username,
+        birthday: userProfile.birthday,
         profileImageUrl: userProfile.profileImageUrl,
         followerCount: userProfile.follower_count,
         followingCount: userProfile.following_count,
@@ -1675,6 +1677,11 @@ app.get("/api/users/:userId/view-profile", verifyToken, (req, res) => {
   });
 });
 
+const formatDateForSQL = (dateStr) => {
+  const [day, month, year] = dateStr.split('/');
+  return `${year}-${month}-${day}`;
+};
+
 app.put(
   "/api/users/:userId/profile",
   verifyToken,
@@ -1683,49 +1690,65 @@ app.put(
     const userId = req.params.userId;
 
     // Extract the data from the request body
-    const { username, bio, gender } = req.body;
-    const profileImage = req.file ? `/uploads/${req.file.filename}` : null; // เพิ่มการต่อด้วย path.extname() เพื่อให้แน่ใจว่านามสกุลไฟล์ถูกต้อง
-    console.log(profileImage);
+    let { username, bio, gender, birthday } = req.body;
+    const profileImage = req.file ? `/uploads/${req.file.filename}` : null;
+
     // Validate that the necessary fields are provided
-    if (!username || !bio || !gender) {
+    if (!username || !bio || !gender || !birthday) {
       return res
         .status(400)
-        .json({ error: "All fields are required: username, bio, and gender" });
+        .json({ error: "All fields are required: username, bio, gender, and birthday" });
     }
 
-    // SQL query to update the user's profile
-    let updateProfileSql = `UPDATE users SET username = ?, bio = ?, gender = ?`;
+    // Convert the birthday to the format "yyyy-MM-dd"
+    birthday = formatDateForSQL(birthday);
 
-    const updateData = [username, bio, gender, userId];
+    // Check if the username is already in use by another user
+    const checkUsernameSql = `SELECT id FROM users WHERE username = ? AND id != ?`;
 
-    // If an image was uploaded, include the profileImage in the update
-    if (profileImage) {
-      updateProfileSql += `, picture = ?`;
-      updateData.splice(3, 0, profileImage); // Insert profileImage into the query parameters
-    }
-
-    updateProfileSql += ` WHERE id = ?;`;
-
-    // Execute the SQL query to update the user's profile
-    pool.query(updateProfileSql, updateData, (error, results) => {
-      if (error) {
-        return res
-          .status(500)
-          .json({ error: "Database error while updating user profile" });
+    pool.query(checkUsernameSql, [username, userId], (checkError, checkResults) => {
+      if (checkError) {
+        return res.status(500).json({ error: "Database error while checking username" });
       }
 
-      if (results.affectedRows === 0) {
-        return res.status(404).json({ error: "User not found" });
+      if (checkResults.length > 0) {
+        // Username is already taken by another user
+        return res.status(400).json({ error: "Username is already in use" });
       }
 
-      // Respond with a success message and the profile image URL
-      res.json({
-        message: "Profile updated successfully",
-        profileImage: profileImage, // ส่งค่า profileImage กลับแบบเต็มรวม path และ extension
+      // SQL query to update the user's profile
+      let updateProfileSql = `UPDATE users SET username = ?, bio = ?, gender = ?, birthday = ?`;
+      const updateData = [username, bio, gender, birthday, userId];
+
+      // If an image was uploaded, include the profileImage in the update
+      if (profileImage) {
+        updateProfileSql += `, picture = ?`;
+        updateData.splice(4, 0, profileImage); // Insert profileImage into the query parameters
+      }
+
+      updateProfileSql += ` WHERE id = ?;`;
+
+      // Execute the SQL query to update the user's profile
+      pool.query(updateProfileSql, updateData, (error, results) => {
+        if (error) {
+          return res.status(500).json({ error: "Database error while updating user profile" });
+        }
+
+        if (results.affectedRows === 0) {
+          return res.status(404).json({ error: "User not found" });
+        }
+
+        // Respond with a success message and the profile image URL
+        res.json({
+          message: "Profile updated successfully",
+          profileImage: profileImage || "No image uploaded", // Ensure null image is handled correctly
+        });
       });
     });
   }
 );
+
+
 
 // API endpoint to follow or unfollow another user
 app.post("/api/users/:userId/follow/:followingId", verifyToken, (req, res) => {
