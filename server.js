@@ -1699,11 +1699,6 @@ app.get("/api/users/:userId/view-profile", verifyToken, (req, res) => {
   });
 });
 
-const formatDateForSQL = (dateStr) => {
-  const [day, month, year] = dateStr.split('/');
-  return `${year}-${month}-${day}`;
-};
-
 app.put(
   "/api/users/:userId/profile",
   verifyToken,
@@ -1722,14 +1717,20 @@ app.put(
         .json({ error: "All fields are required: username, bio, gender, and birthday" });
     }
 
+    // Check if birthday is valid and in the correct format
+    if (isNaN(Date.parse(birthday))) {
+      return res.status(400).json({ error: "Invalid birthday format" });
+    }
+
     // Convert the birthday to the format "yyyy-MM-dd"
-    birthday = formatDateForSQL(birthday);
+    birthday = formatDateForSQL(birthday); // This function should correctly format the date
 
     // Check if the username is already in use by another user
     const checkUsernameSql = `SELECT id FROM users WHERE username = ? AND id != ?`;
 
     pool.query(checkUsernameSql, [username, userId], (checkError, checkResults) => {
       if (checkError) {
+        console.error("Error checking username:", checkError); // Logging the error
         return res.status(500).json({ error: "Database error while checking username" });
       }
 
@@ -1740,19 +1741,21 @@ app.put(
 
       // SQL query to update the user's profile
       let updateProfileSql = `UPDATE users SET username = ?, bio = ?, gender = ?, birthday = ?`;
-      const updateData = [username, bio, gender, birthday, userId];
+      const updateData = [username, bio, gender, birthday];
 
       // If an image was uploaded, include the profileImage in the update
       if (profileImage) {
         updateProfileSql += `, picture = ?`;
-        updateData.splice(4, 0, profileImage); // Insert profileImage into the query parameters
+        updateData.push(profileImage); // Insert profileImage into the query parameters
       }
 
       updateProfileSql += ` WHERE id = ?;`;
+      updateData.push(userId); // Add the userId at the end of the updateData array
 
       // Execute the SQL query to update the user's profile
       pool.query(updateProfileSql, updateData, (error, results) => {
         if (error) {
+          console.error("Error updating profile:", error); // Logging the error
           return res.status(500).json({ error: "Database error while updating user profile" });
         }
 
@@ -1769,6 +1772,16 @@ app.put(
     });
   }
 );
+
+// Helper function to format the birthday for SQL (YYYY-MM-DD)
+function formatDateForSQL(dateString) {
+  const dateObj = new Date(dateString);
+  const year = dateObj.getFullYear();
+  const month = String(dateObj.getMonth() + 1).padStart(2, '0'); // Ensure 2 digits
+  const day = String(dateObj.getDate()).padStart(2, '0'); // Ensure 2 digits
+  return `${year}-${month}-${day}`;
+}
+
 
 
 
@@ -1983,6 +1996,7 @@ app.get("/api/bookmarks", verifyToken, (req, res) => {
   const fetchBookmarksSql = `
     SELECT 
       p.id AS post_id, 
+      p.title,
       p.content, 
       p.photo_url, 
       p.video_url, 
@@ -2044,6 +2058,7 @@ app.get("/api/bookmarks", verifyToken, (req, res) => {
 
       return {
         post_id: post.post_id,
+        title: post.title,
         content: post.content,
         created_at: post.updated_at,
         like_count: post.like_count,
