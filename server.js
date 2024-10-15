@@ -1945,6 +1945,54 @@ app.post("/posts/:postId/comment", verifyToken, (req, res) => {
 });
 
 
+// DELETE /posts/:postId/comment/:commentId
+app.delete("/posts/:postId/comment/:commentId", verifyToken, (req, res) => {
+  const { postId, commentId } = req.params; // Extract postId and commentId from URL parameters
+  const userId = req.userId; // Extract userId from the verified token
+
+  // SQL Query to check if the comment exists and belongs to the user
+  const checkCommentSql = "SELECT * FROM comments WHERE id = ? AND user_id = ? AND post_id = ?";
+
+  pool.query(checkCommentSql, [commentId, userId, postId], (err, results) => {
+    if (err) {
+      console.error("Database error during comment check:", err);
+      return res.status(500).json({ error: "Error checking comment" });
+    }
+
+    if (results.length === 0) {
+      return res.status(404).json({ error: "Comment not found or you are not authorized to delete this comment" });
+    }
+
+    // SQL Query to delete the comment
+    const deleteCommentSql = "DELETE FROM comments WHERE id = ? AND user_id = ? AND post_id = ?";
+
+    pool.query(deleteCommentSql, [commentId, userId, postId], (err, results) => {
+      if (err) {
+        console.error("Database error during comment deletion:", err);
+        return res.status(500).json({ error: "Error deleting comment" });
+      }
+
+      if (results.affectedRows === 0) {
+        return res.status(404).json({ error: "Comment not found or not deleted" });
+      }
+
+      // After successfully deleting the comment, delete related notification for that specific comment
+      const deleteNotificationSql = "DELETE FROM notifications WHERE comment_id = ?";
+
+      pool.query(deleteNotificationSql, [commentId], (err, notificationResults) => {
+        if (err) {
+          console.error("Database error during notification deletion:", err);
+          return res.status(500).json({ error: "Error deleting notifications" });
+        }
+
+        return res.status(200).json({ message: "Comment and associated notification deleted successfully" });
+      });
+    });
+  });
+});
+
+
+
 app.post("/posts/:postId/bookmark", verifyToken, (req, res) => {
   const { postId } = req.params; // Extract postId from URL parameters
   const userId = req.userId; // Extract userId from the verified token
@@ -2083,24 +2131,21 @@ app.get("/api/bookmarks", verifyToken, (req, res) => {
 
 
 
-
 app.post("/api/notifications", verifyToken, (req, res) => {
-  const { user_id, post_id, action_type, content } = req.body;
+  const { user_id, post_id, action_type, content, comment_id } = req.body;
 
   if (!user_id || !action_type) {
-    return res
-      .status(400)
-      .json({ error: "Missing required fields: user_id or action_type" });
+    return res.status(400).json({ error: "Missing required fields: user_id or action_type" });
   }
 
   // ตรวจสอบว่าเป็น action_type อะไร
   if (action_type === 'comment') {
     // สำหรับ comment ให้สร้าง Notification ใหม่ทุกครั้ง
     const insertNotificationSql = `
-      INSERT INTO notifications (user_id, post_id, action_type, content)
-      VALUES (?, ?, ?, ?);
+      INSERT INTO notifications (user_id, post_id, comment_id, action_type, content)
+      VALUES (?, ?, ?, ?, ?);
     `;
-    const values = [user_id, post_id || null, action_type, content || null];
+    const values = [user_id, post_id || null, comment_id || null, action_type, content || null];
 
     pool.query(insertNotificationSql, values, (error, results) => {
       if (error) {
@@ -2146,10 +2191,10 @@ app.post("/api/notifications", verifyToken, (req, res) => {
       } else {
         // ถ้าไม่มี Notification เดิม ให้เพิ่ม Notification ใหม่
         const insertNotificationSql = `
-          INSERT INTO notifications (user_id, post_id, action_type, content)
-          VALUES (?, ?, ?, ?);
+          INSERT INTO notifications (user_id, post_id, comment_id, action_type, content)
+          VALUES (?, ?, ?, ?, ?);
         `;
-        const values = [user_id, post_id || null, action_type, content || null];
+        const values = [user_id, post_id || null, comment_id || null, action_type, content || null];
 
         pool.query(insertNotificationSql, values, (error, results) => {
           if (error) {
@@ -2174,30 +2219,30 @@ app.get("/api/notifications", verifyToken, (req, res) => {
   const userId = req.userId;
 
   const fetchActionNotificationsSql = `
-SELECT 
-  n.id, 
-  n.user_id AS receiver_id, 
-  n.post_id, 
-  n.action_type, 
-  n.content, 
-  n.read_status,
-  n.created_at,
-  s.username AS sender_name,
-  s.picture AS sender_picture, 
-  p_owner.username AS receiver_name,
-  c.comment_text AS comment_content  
-FROM notifications n
-LEFT JOIN users s ON n.user_id = s.id
-LEFT JOIN posts p ON n.post_id = p.id
-LEFT JOIN users p_owner ON p.user_id = p_owner.id
-LEFT JOIN comments c ON n.post_id = c.post_id AND n.action_type = 'comment'
-WHERE n.action_type IN ('comment', 'like', 'follow')
-  AND p_owner.id = ?
-ORDER BY n.created_at DESC;
-`;
+  SELECT 
+    n.id, 
+    n.user_id AS receiver_id, 
+    n.post_id, 
+    n.comment_id,   
+    n.action_type, 
+    n.content, 
+    n.read_status,
+    n.created_at,
+    s.username AS sender_name,
+    s.picture AS sender_picture, 
+    p_owner.username AS receiver_name,
+    c.comment_text AS comment_content  
+  FROM notifications n
+  LEFT JOIN users s ON n.user_id = s.id
+  LEFT JOIN posts p ON n.post_id = p.id
+  LEFT JOIN users p_owner ON p.user_id = p_owner.id
+  LEFT JOIN comments c ON n.post_id = c.post_id AND n.action_type = 'comment' 
+  WHERE n.action_type IN ('comment', 'like', 'follow')
+    AND p_owner.id = ?
+  ORDER BY n.created_at DESC;
+  `;
 
-  // กำหนดตัวแปรใน SQL Query
-  pool.query(fetchActionNotificationsSql, [userId, userId], (error, results) => {
+  pool.query(fetchActionNotificationsSql, [userId], (error, results) => {
     if (error) {
       console.error("Database error during fetching notifications:", error);
       return res.status(500).json({ error: "Error fetching notifications" });
@@ -2205,6 +2250,7 @@ ORDER BY n.created_at DESC;
     res.json(results);
   });
 });
+
 
 
 
