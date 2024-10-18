@@ -2404,6 +2404,126 @@ app.get("/posts/:postId/bookmark/status", verifyToken, (req, res) => {
 });
 
 
+// API to get posts from followed users
+app.get("/api/following/posts", verifyToken, (req, res) => {
+  const userId = req.userId; // The logged-in user who is following others
+
+  const getFollowedPostsSql = `
+    SELECT 
+      p.id AS id, 
+      p.user_id AS userId, 
+      p.title AS title, 
+      p.content AS content, 
+      p.photo_url AS photoUrl, 
+      p.video_url AS videoUrl, 
+      u.username AS userName, 
+      u.picture AS userProfileUrl, 
+      p.updated_at AS updated, 
+      (SELECT COUNT(*) FROM likes WHERE post_id = p.id) AS likeCount, 
+      (SELECT COUNT(*) FROM comments WHERE post_id = p.id) AS commentCount, 
+      EXISTS(SELECT 1 FROM likes WHERE post_id = p.id AND user_id = ?) AS is_liked
+    FROM posts p
+    JOIN follower_following f ON p.user_id = f.following_id
+    JOIN users u ON p.user_id = u.id
+    WHERE f.follower_id = ?
+    ORDER BY p.updated_at DESC;
+  `;
+
+  pool.query(getFollowedPostsSql, [userId, userId], (error, results) => {
+    if (error) {
+      return res.status(500).json({ error: "Database error during fetching followed posts." });
+    }
+
+    // If there are no followed posts, return an empty array
+    if (results.length === 0) {
+      return res.status(200).json({ message: "No posts from followed users.", posts: [] });
+    }
+
+    // Format the response and send it
+    const posts = results.map((post) => ({
+      id: post.id,
+      userId: post.userId,
+      userName: post.userName,
+      title: post.title,
+      content: post.content,
+      photoUrl: Array.isArray(post.photoUrl) ? post.photoUrl : [], // Ensure it's an array
+      videoUrl: Array.isArray(post.videoUrl) ? post.videoUrl : [], // Ensure it's an array
+      userProfileUrl: post.userProfileUrl,
+      time: post.time, // Assuming `created_at` is used as the "time"
+      updated: post.updated, 
+      is_liked: !!post.is_liked, // Convert to Boolean
+      likeCount: post.likeCount || 0,
+      commentCount: post.commentCount || 0
+    }));
+
+    res.status(200).json({ posts });
+  });
+});
+
+
+
+// API for reporting a post
+app.post("/posts/:postId/report", verifyToken, (req, res) => {
+  const { postId } = req.params;
+  const { reason } = req.body;
+  const userId = req.userId; // Extract userId from the token
+
+  // Validate the reason for reporting
+  if (!reason || reason.trim() === "") {
+    return res.status(400).json({ error: "Report reason is required" });
+  }
+
+  // SQL to insert the report into the database
+  const insertReportSql = `
+    INSERT INTO reports (user_id, post_id, reason)
+    VALUES (?, ?, ?);
+  `;
+
+  pool.query(insertReportSql, [userId, postId, reason], (error, results) => {
+    if (error) {
+      console.error("Database error during reporting post:", error);
+      return res.status(500).json({ error: "Error reporting post" });
+    }
+
+    res.status(201).json({ message: "Post reported successfully" });
+  });
+});
+
+
+
+
+
+
+// API for retrieving all reported posts (admin-only)
+app.get("/reports", verifyToken, (req, res) => {
+  const role = req.role;
+
+  // Only allow admin to view reports
+  if (role !== "admin") {
+    return res.status(403).json({ error: "Unauthorized access" });
+  }
+
+  const fetchReportsSql = `
+    SELECT r.*, u.username AS reported_by, p.title AS post_title
+    FROM reports r
+    JOIN users u ON r.user_id = u.id
+    JOIN posts p ON r.post_id = p.id
+    WHERE r.status = 'pending'
+    ORDER BY r.reported_at DESC;
+  `;
+
+  pool.query(fetchReportsSql, (error, results) => {
+    if (error) {
+      console.error("Database error during fetching reports:", error);
+      return res.status(500).json({ error: "Error fetching reports" });
+    }
+
+    res.json(results);
+  });
+});
+
+
+
 // Start the server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
