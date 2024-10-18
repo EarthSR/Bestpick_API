@@ -2440,25 +2440,30 @@ app.get("/api/following/posts", verifyToken, (req, res) => {
     }
 
     // Format the response and send it
-    const posts = results.map((post) => ({
-      id: post.id,
-      userId: post.userId,
-      userName: post.userName,
-      title: post.title,
-      content: post.content,
-      photoUrl: Array.isArray(post.photoUrl) ? post.photoUrl : [], // Ensure it's an array
-      videoUrl: Array.isArray(post.videoUrl) ? post.videoUrl : [], // Ensure it's an array
-      userProfileUrl: post.userProfileUrl,
-      time: post.time, // Assuming `created_at` is used as the "time"
-      updated: post.updated, 
-      is_liked: !!post.is_liked, // Convert to Boolean
-      likeCount: post.likeCount || 0,
-      commentCount: post.commentCount || 0
-    }));
+    const parsedResults = results.map((post) => {
+      const photoUrls = Array.isArray(post.photoUrl) ? post.photoUrl : []; // Fix: Use 'photoUrl' for consistency
+      const videoUrls = Array.isArray(post.videoUrl) ? post.videoUrl : []; // Fix: Use 'videoUrl' for consistency
 
-    res.status(200).json({ posts });
+      return {
+        id: post.id,
+        userId: post.userId,
+        title: post.title,
+        content: post.content,
+        updated: post.updated, 
+        photo_url: photoUrls,
+        video_url: videoUrls,
+        userName: post.userName,
+        userProfileUrl: post.userProfileUrl,
+        likeCount: post.likeCount || 0,
+        commentCount: post.commentCount || 0,
+        isLiked: !!post.is_liked, // Convert to Boolean
+      };
+    });
+
+    res.status(200).json({ posts: parsedResults }); // Return the parsed results
   });
 });
+
 
 
 
