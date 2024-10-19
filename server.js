@@ -180,57 +180,85 @@ function sendOtpEmail(email, otp, callback) {
   });
 }
 
-// Register a new email user
+// Register a new email user or reactivate if deactivated
 app.post("/register/email", async (req, res) => {
   try {
     const { email } = req.body;
+
+    // Check if the email is already registered and active
     const checkRegisteredSql =
-      "SELECT * FROM users WHERE email = ? AND password IS NOT NULL";
+      "SELECT * FROM users WHERE email = ? AND status = 'active' AND password IS NOT NULL";
 
     pool.query(checkRegisteredSql, [email], (err, results) => {
-      if (err)
-        throw new Error("Database error during email registration check");
+      if (err) throw new Error("Database error during email registration check");
+
+      // If the email is already registered and active
       if (results.length > 0)
         return res.status(400).json({ error: "Email already registered" });
 
-      const checkSql =
-        "SELECT * FROM users WHERE email = ? AND password IS NULL";
-      pool.query(checkSql, [email], (err, results) => {
+      // Check if the email exists but is deactivated
+      const checkDeactivatedSql =
+        "SELECT * FROM users WHERE email = ? AND status = 'deactivated'";
+
+      pool.query(checkDeactivatedSql, [email], (err, deactivatedResults) => {
         if (err) throw new Error("Database error during email check");
-        if (results.length > 0)
-          return res
-            .status(400)
-            .json({ error: "Email already in use or used in another sign-in" });
 
-        const otp = generateOtp();
-        const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+        // If the email exists and is deactivated, reactivate the account
+        if (deactivatedResults.length > 0) {
+          const reactivateUserSql =
+            "UPDATE users SET status = 'active' WHERE email = ?";
+          pool.query(reactivateUserSql, [email], (err) => {
+            if (err) throw new Error("Database error during account reactivation");
 
-        const findOtpSql = "SELECT * FROM otps WHERE email = ?";
-        pool.query(findOtpSql, [email], (err, otpResults) => {
-          if (err) throw new Error("Database error during OTP retrieval");
-
-          if (otpResults.length > 0) {
-            const updateOtpSql =
-              "UPDATE otps SET otp = ?, expires_at = ? WHERE email = ?";
-            pool.query(updateOtpSql, [otp, expiresAt, email], (err) => {
-              if (err) throw new Error("Database error during OTP update");
-              sendOtpEmail(email, otp, (error) => {
-                if (error) throw new Error("Error sending OTP email");
-                res.status(200).json({ message: "OTP sent to email" });
-              });
+            return res.status(200).json({
+              message: "Account reactivated successfully. You can now log in.",
             });
-          } else {
-            const insertOtpSql =
-              "INSERT INTO otps (email, otp, expires_at) VALUES (?, ?, ?)";
-            pool.query(insertOtpSql, [email, otp, expiresAt], (err) => {
-              if (err) throw new Error("Database error during OTP insertion");
-              sendOtpEmail(email, otp, (error) => {
-                if (error) throw new Error("Error sending OTP email");
-                res.status(200).json({ message: "OTP sent to email" });
-              });
+          });
+        } else {
+          // Check if the email is in use but the registration process was incomplete
+          const checkIncompleteSql =
+            "SELECT * FROM users WHERE email = ? AND password IS NULL AND status = 'active' ";
+          pool.query(checkIncompleteSql, [email], (err, results) => {
+            if (err) throw new Error("Database error during email check");
+            if (results.length > 0)
+              return res
+                .status(400)
+                .json({
+                  error: "Email already in use or used in another sign-in",
+                });
+
+            // If no existing user found, proceed with OTP generation
+            const otp = generateOtp();
+            const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+
+            const findOtpSql = "SELECT * FROM otps WHERE email = ?";
+            pool.query(findOtpSql, [email], (err, otpResults) => {
+              if (err) throw new Error("Database error during OTP retrieval");
+
+              if (otpResults.length > 0) {
+                const updateOtpSql =
+                  "UPDATE otps SET otp = ?, expires_at = ? WHERE email = ?";
+                pool.query(updateOtpSql, [otp, expiresAt, email], (err) => {
+                  if (err) throw new Error("Database error during OTP update");
+                  sendOtpEmail(email, otp, (error) => {
+                    if (error) throw new Error("Error sending OTP email");
+                    res.status(200).json({ message: "OTP sent to email" });
+                  });
+                });
+              } else {
+                const insertOtpSql =
+                  "INSERT INTO otps (email, otp, expires_at) VALUES (?, ?, ?)";
+                pool.query(insertOtpSql, [email, otp, expiresAt], (err) => {
+                  if (err) throw new Error("Database error during OTP insertion");
+                  sendOtpEmail(email, otp, (error) => {
+                    if (error) throw new Error("Error sending OTP email");
+                    res.status(200).json({ message: "OTP sent to email" });
+                  });
+                });
+              }
             });
-          }
-        });
+          });
+        }
       });
     });
   } catch (error) {
@@ -238,6 +266,7 @@ app.post("/register/email", async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 });
+
 
 // Verify OTP
 app.post("/register/verify-otp", async (req, res) => {
@@ -609,7 +638,7 @@ app.post("/set-profile", verifyToken, upload.single('picture'), (req, res) => {
 
 
 
-// Google Sign-In
+// Google Sign-In with soft delete handling
 app.post("/google-signin", async (req, res) => {
   try {
     const { googleId, email } = req.body;
@@ -619,35 +648,61 @@ app.post("/google-signin", async (req, res) => {
       return res.status(400).json({ error: "Missing required fields" });
     }
 
-    // ค้นหาผู้ใช้ที่มี google_id และ status = 'active'
-    const checkGoogleIdSql = "SELECT * FROM users WHERE google_id = ? AND status = 'active'";
+    // ค้นหาผู้ใช้ที่มี google_id และ status = 'active' หรือ 'deleted'
+    const checkGoogleIdSql =
+      "SELECT * FROM users WHERE google_id = ? AND (status = 'active' OR status = 'deactivated')";
     pool.query(checkGoogleIdSql, [googleId], (err, googleIdResults) => {
       if (err) throw new Error("Database error during Google ID check");
 
       if (googleIdResults.length > 0) {
         const user = googleIdResults[0];
-        const updateSql = "UPDATE users SET email = ? WHERE google_id = ?";
-        pool.query(updateSql, [email, googleId], (err) => {
-          if (err) throw new Error("Database error during user update");
 
-          const token = jwt.sign({ id: user.id,role: user.role }, JWT_SECRET);
-          return res.json({
-            message: "User information updated successfully",
-            token,
-            user: {
-              id: user.id,
-              email: user.email,
-              picture: user.picture,
-              username: user.username,
-              google_id: user.google_id,
-              role: user.role, // เพิ่มบทบาท
-              status: user.status, // เพิ่มสถานะ
-            },
+        // Reactivate user if status is 'deleted'
+        if (user.status === "deactivated") {
+          const reactivateSql = "UPDATE users SET status = 'active', email = ? WHERE google_id = ?";
+          pool.query(reactivateSql, [email, googleId], (err) => {
+            if (err) throw new Error("Database error during user reactivation");
+
+            const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET);
+            return res.json({
+              message: "User reactivated and authenticated successfully",
+              token,
+              user: {
+                id: user.id,
+                email: user.email,
+                picture: user.picture,
+                username: user.username,
+                google_id: user.google_id,
+                role: user.role,
+                status: 'active',
+              },
+            });
           });
-        });
+        } else {
+          // If the user is already active, update email if necessary
+          const updateSql = "UPDATE users SET email = ? WHERE google_id = ?";
+          pool.query(updateSql, [email, googleId], (err) => {
+            if (err) throw new Error("Database error during user update");
+
+            const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET);
+            return res.json({
+              message: "User information updated successfully",
+              token,
+              user: {
+                id: user.id,
+                email: user.email,
+                picture: user.picture,
+                username: user.username,
+                google_id: user.google_id,
+                role: user.role,
+                status: user.status,
+              },
+            });
+          });
+        }
       } else {
         // ตรวจสอบว่ามี email นี้ในฐานข้อมูลหรือไม่
-        const checkEmailSql = "SELECT * FROM users WHERE email = ?";
+        const checkEmailSql = "SELECT * FROM users WHERE email = ? AND status = 'active'";
         pool.query(checkEmailSql, [email], (err, emailResults) => {
           if (err) throw new Error("Database error during email check");
           if (emailResults.length > 0) {
@@ -658,7 +713,7 @@ app.post("/google-signin", async (req, res) => {
 
           // หากไม่มีผู้ใช้ในระบบ ให้สร้างผู้ใช้ใหม่ด้วย Google ID, email, status และ role
           const insertSql =
-            'INSERT INTO users (google_id, email, username, status, role) VALUES (?, ?, "", "active", "user")';
+            "INSERT INTO users (google_id, email, username, status, role) VALUES (?, ?, '', 'active', 'user')";
           pool.query(insertSql, [googleId, email], (err, result) => {
             if (err) throw new Error("Database error during user insertion");
 
@@ -668,7 +723,7 @@ app.post("/google-signin", async (req, res) => {
               if (err) throw new Error("Database error during new user fetch");
 
               const newUser = newUserResults[0];
-              const token = jwt.sign({ id: user.id,role: user.role }, JWT_SECRET);
+              const token = jwt.sign({ id: newUser.id, role: newUser.role }, JWT_SECRET);
 
               return res.status(201).json({
                 message: "User registered and authenticated successfully",
@@ -679,8 +734,8 @@ app.post("/google-signin", async (req, res) => {
                   picture: newUser.picture,
                   username: newUser.username,
                   google_id: newUser.google_id,
-                  role: newUser.role, // เพิ่มบทบาท
-                  status: newUser.status, // เพิ่มสถานะ
+                  role: newUser.role,
+                  status: newUser.status,
                 },
               });
             });
@@ -693,6 +748,7 @@ app.post("/google-signin", async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 });
+
 
 
 // POST /api/interactions - บันทึกการโต้ตอบใหม่
@@ -906,6 +962,7 @@ app.get("/posts", verifyToken, (req, res) => {
       FROM posts 
       JOIN users ON posts.user_id = users.id
       WHERE posts.status = 'active' 
+      ORDER BY posts.updated_at DESC;
     `;
 
     pool.query(query, [userId], (err, results) => {
@@ -2527,6 +2584,44 @@ app.get("/reports", verifyToken, (req, res) => {
   });
 });
 
+
+// Soft Delete a User and Hard Delete their Posts
+app.delete("/users/:id", verifyToken, (req, res) => {
+  const { id } = req.params;
+  const user_id = req.userId; // Get user ID from the token
+
+  // Only allow the user to delete their own account or admin role
+  if (parseInt(user_id) !== parseInt(id) && req.role !== "admin") {
+    return res.status(403).json({ error: "You do not have permission to delete this user." });
+  }
+
+  // First, delete all posts of the user (hard delete)
+  const deletePostsSql = "DELETE FROM posts WHERE user_id = ?";
+  pool.query(deletePostsSql, [id], (postErr, postResults) => {
+    if (postErr) {
+      console.error("Database error during post deletion:", postErr);
+      return res.status(500).json({ error: "Database error during post deletion" });
+    }
+
+    // Now, soft delete the user (update status to 'deactivated' or 'deleted')
+    const softDeleteUserSql = "UPDATE users SET status = 'deactivated' WHERE id = ?";
+    pool.query(softDeleteUserSql, [id], (userErr, userResults) => {
+      if (userErr) {
+        console.error("Database error during user soft deletion:", userErr);
+        return res.status(500).json({ error: "Database error during user soft deletion" });
+      }
+
+      if (userResults.affectedRows === 0) {
+        return res.status(404).json({ error: "User not found" });
+      }
+
+      res.json({
+        message: "User soft-deleted and their posts hard-deleted successfully",
+        deletedPostsCount: postResults.affectedRows // Return the number of posts deleted
+      });
+    });
+  });
+});
 
 
 // Start the server
