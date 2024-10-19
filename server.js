@@ -2585,7 +2585,7 @@ app.get("/reports", verifyToken, (req, res) => {
 });
 
 
-// Soft Delete a User and Hard Delete their Posts
+// Soft Delete a User, Hard Delete their Posts, and Delete Follows
 app.delete("/users/:id", verifyToken, (req, res) => {
   const { id } = req.params;
   const user_id = req.userId; // Get user ID from the token
@@ -2603,25 +2603,36 @@ app.delete("/users/:id", verifyToken, (req, res) => {
       return res.status(500).json({ error: "Database error during post deletion" });
     }
 
-    // Now, soft delete the user (update status to 'deactivated' or 'deleted')
-    const softDeleteUserSql = "UPDATE users SET status = 'deactivated' WHERE id = ?";
-    pool.query(softDeleteUserSql, [id], (userErr, userResults) => {
-      if (userErr) {
-        console.error("Database error during user soft deletion:", userErr);
-        return res.status(500).json({ error: "Database error during user soft deletion" });
+    // Next, delete all follows of the user (both following and followers)
+    const deleteFollowsSql = "DELETE FROM follower_following WHERE follower_id = ? OR following_id = ?";
+    pool.query(deleteFollowsSql, [id, id], (followErr, followResults) => {
+      if (followErr) {
+        console.error("Database error during follow deletion:", followErr);
+        return res.status(500).json({ error: "Database error during follow deletion" });
       }
 
-      if (userResults.affectedRows === 0) {
-        return res.status(404).json({ error: "User not found" });
-      }
+      // Now, soft delete the user (update status to 'deactivated')
+      const softDeleteUserSql = "UPDATE users SET status = 'deactivated' WHERE id = ?";
+      pool.query(softDeleteUserSql, [id], (userErr, userResults) => {
+        if (userErr) {
+          console.error("Database error during user soft deletion:", userErr);
+          return res.status(500).json({ error: "Database error during user soft deletion" });
+        }
 
-      res.json({
-        message: "User soft-deleted and their posts hard-deleted successfully",
-        deletedPostsCount: postResults.affectedRows // Return the number of posts deleted
+        if (userResults.affectedRows === 0) {
+          return res.status(404).json({ error: "User not found" });
+        }
+
+        res.json({
+          message: "User soft-deleted, their posts and follows deleted successfully",
+          deletedPostsCount: postResults.affectedRows, // Return the number of posts deleted
+          deletedFollowsCount: followResults.affectedRows // Return the number of follows deleted
+        });
       });
     });
   });
 });
+
 
 
 // Start the server
