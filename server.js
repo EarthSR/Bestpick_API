@@ -2634,39 +2634,78 @@ app.delete("/users/:id", verifyToken, (req, res) => {
 });
 
 
-// Real-time Search Followers by Username with Query Parameter
-app.get("/api/users/search/followers", verifyToken, (req, res) => {
-  const { query } = req.query; // รับคำค้นหาจาก query parameter
+app.get("/api/users/following/:userId", (req, res) => {
+  // ดึง userId จาก request parameter
+  const { userId } = req.params;
 
-  if (!query || query.trim() === "") {
-    return res.status(400).json({ error: "Search query is required" });
+  // ตรวจสอบว่ามี userId ใน request หรือไม่
+  if (!userId) {
+    return res.status(400).json({ error: "User ID not provided" });
   }
 
-  const searchValue = `%${query.trim().toLowerCase()}%`; // แปลงคำค้นหาเป็นรูปแบบ LIKE
+  // Query SQL หรือการประมวลผลอื่น ๆ
+  const getFollowingSql = `
+    SELECT 
+      u.id AS userId, 
+      u.username, 
+      u.picture AS profileImageUrl
+    FROM follower_following f
+    JOIN users u ON f.following_id = u.id
+    WHERE f.follower_id = ?;
+  `;
+  pool.query(getFollowingSql, [userId], (err, results) => {
+    if (err) {
+      console.error("Database error during fetching following:", err);
+      return res.status(500).json({ error: "Error fetching following" });
+    }
 
-  const searchFollowersSql = `
+    // ตรวจสอบว่ามีผลลัพธ์หรือไม่
+    if (results.length === 0) {
+      return res.status(404).json({ message: "No following found" });
+    }
+
+    // ส่งผลลัพธ์กลับไป
+    res.json(results);
+  });
+});
+
+app.get("/api/users/followers/:userId", (req, res) => {
+  // ดึง userId จาก request parameter
+  const { userId } = req.params;
+
+  // ตรวจสอบว่ามี userId ใน request หรือไม่
+  if (!userId) {
+    return res.status(400).json({ error: "User ID not provided" });
+  }
+
+  // Query SQL เพื่อตรวจสอบผู้ที่ติดตาม userId
+  const getFollowersSql = `
     SELECT 
       u.id AS userId, 
       u.username, 
       u.picture AS profileImageUrl
     FROM follower_following f
     JOIN users u ON f.follower_id = u.id
-    WHERE LOWER(u.username) LIKE ?;
+    WHERE f.following_id = ?;
   `;
 
-  pool.query(searchFollowersSql, [searchValue], (err, results) => {
+  pool.query(getFollowersSql, [userId], (err, results) => {
     if (err) {
-      console.error("Database error during followers search:", err);
+      console.error("Database error during fetching followers:", err);
       return res.status(500).json({ error: "Error fetching followers" });
     }
 
+    // ตรวจสอบว่ามีผลลัพธ์หรือไม่
     if (results.length === 0) {
       return res.status(404).json({ message: "No followers found" });
     }
 
+    // ส่งผลลัพธ์กลับไป
     res.json(results);
   });
 });
+
+
 
 
 // Real-time Search Following by Username with Query Parameter
