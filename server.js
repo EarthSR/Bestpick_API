@@ -2634,6 +2634,78 @@ app.delete("/users/:id", verifyToken, (req, res) => {
 });
 
 
+// Real-time Search Followers by Username with Query Parameter
+app.get("/api/users/search/followers", verifyToken, (req, res) => {
+  const { query } = req.query; // รับคำค้นหาจาก query parameter
+
+  if (!query || query.trim() === "") {
+    return res.status(400).json({ error: "Search query is required" });
+  }
+
+  const searchValue = `%${query.trim().toLowerCase()}%`; // แปลงคำค้นหาเป็นรูปแบบ LIKE
+
+  const searchFollowersSql = `
+    SELECT 
+      u.id AS userId, 
+      u.username, 
+      u.picture AS profileImageUrl
+    FROM follower_following f
+    JOIN users u ON f.follower_id = u.id
+    WHERE LOWER(u.username) LIKE ?;
+  `;
+
+  pool.query(searchFollowersSql, [searchValue], (err, results) => {
+    if (err) {
+      console.error("Database error during followers search:", err);
+      return res.status(500).json({ error: "Error fetching followers" });
+    }
+
+    if (results.length === 0) {
+      return res.status(404).json({ message: "No followers found" });
+    }
+
+    res.json(results);
+  });
+});
+
+
+// Real-time Search Following by Username with Query Parameter
+app.get("/api/users/search/following", verifyToken, (req, res) => {
+  const { query } = req.query; // รับคำค้นหาจาก query parameter
+
+  if (!query || query.trim() === "") {
+    return res.status(400).json({ error: "Search query is required" });
+  }
+
+  const searchValue = `%${query.trim().toLowerCase()}%`; // แปลงคำค้นหาเป็นรูปแบบ LIKE
+
+  const searchFollowingSql = `
+    SELECT 
+      u.id AS userId, 
+      u.username, 
+      u.picture AS profileImageUrl
+    FROM follower_following f
+    JOIN users u ON f.following_id = u.id
+    WHERE LOWER(u.username) LIKE ?;
+  `;
+
+  pool.query(searchFollowingSql, [searchValue], (err, results) => {
+    if (err) {
+      console.error("Database error during following search:", err);
+      return res.status(500).json({ error: "Error fetching following" });
+    }
+
+    if (results.length === 0) {
+      return res.status(404).json({ message: "No following found" });
+    }
+
+    res.json(results);
+  });
+});
+
+
+
+
 
 // Start the server
 const PORT = process.env.PORT || 3000;
