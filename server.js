@@ -1662,7 +1662,8 @@ app.get("/api/users/:userId/view-profile", verifyToken, (req, res) => {
 
   const postSql = `
     SELECT 
-      p.id AS post_id, 
+      p.id AS post_id,
+      p.title, 
       p.content, 
       p.photo_url, 
       p.video_url, 
@@ -1723,6 +1724,7 @@ app.get("/api/users/:userId/view-profile", verifyToken, (req, res) => {
 
         return {
           post_id: post.post_id,
+          title: post.title,
           content: post.content,
           created_at: post.updated_at,
           like_count: post.like_count,
