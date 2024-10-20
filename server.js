@@ -2815,11 +2815,11 @@ app.get("/admin/dashboard", verifyToken, (req, res) => {
   // Query to get total posts per day and total posts
   const totalPostsQuery = `
     SELECT 
-      DATE(created_at) AS date, 
+      DATE(updated_at) AS date, 
       COUNT(*) AS total_posts 
     FROM posts
-    GROUP BY DATE(created_at)
-    ORDER BY DATE(created_at) DESC;
+    GROUP BY DATE(updated_at)
+    ORDER BY DATE(updated_at) DESC;
   `;
 
   // Execute both queries in parallel
@@ -2843,6 +2843,7 @@ app.get("/admin/dashboard", verifyToken, (req, res) => {
     });
   });
 });
+
 
 // Start the server
 const PORT = process.env.PORT || 3000;
