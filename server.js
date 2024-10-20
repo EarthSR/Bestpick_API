@@ -34,16 +34,11 @@ const pool = mysql.createPool({
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
-  port: process.env.DB_PORT,
   waitForConnections: true,
   connectionLimit: 20,
   queueLimit: 0,
   connectTimeout: 60000,
   acquireTimeout: 60000,
-  ssl: {
-    rejectUnauthorized: true, // กำหนดว่าเซิร์ฟเวอร์ต้องมีใบรับรองที่น่าเชื่อถือ
-    ca: fs.readFileSync("./certs/isrgrootx1.pem"), // เพิ่มไฟล์ใบรับรอง
-  },
 });
 
 
