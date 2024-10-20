@@ -2772,6 +2772,118 @@ app.get("/api/users/search/followers", verifyToken, (req, res) => {
 
 
 
+<<<<<<< HEAD
+=======
+    const sql = "SELECT * FROM users WHERE email = ? AND status = 'active' AND role = 'admin'";
+    pool.query(sql, [email], (err, results) => {
+      if (err) throw new Error("Database error during admin login");
+      if (results.length === 0) {
+        return res.status(404).json({ message: "No admin user found" });
+      }
+
+      const user = results[0];
+
+      // Compare the entered password with the stored hashed password
+      bcrypt.compare(password, user.password, (err, isMatch) => {
+        if (err) throw new Error("Password comparison error");
+        if (!isMatch) {
+          // Increment failed attempts and update last_failed_attempt
+          const updateFailSql =
+            "UPDATE users SET failed_attempts = failed_attempts + 1, last_failed_attempt = NOW() WHERE id = ?";
+          pool.query(updateFailSql, [user.id], (err) => {
+            if (err) console.error("Error logging failed login attempt:", err);
+          });
+
+          const remainingAttempts = 5 - (user.failed_attempts + 1); // +1 for current attempt
+          return res
+            .status(401)
+            .json({ message: `Email or Password is incorrect. You have ${remainingAttempts} attempts left.` });
+        }
+
+        // Reset failed attempts after a successful login
+        const resetFailSql =
+          "UPDATE users SET failed_attempts = 0, last_login = NOW(), last_login_ip = ? WHERE id = ?";
+        pool.query(resetFailSql, [ipAddress, user.id], (err) => {
+          if (err)
+            throw new Error("Error resetting failed attempts or updating login time.");
+
+          // Generate JWT token for admin
+          const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET);
+
+          // Return successful login response with token and admin data
+          res.status(200).json({
+            message: "Admin authentication successful",
+            token,
+            user: {
+              id: user.id,
+              email,
+              username: user.username,
+              picture: user.picture,
+              role: user.role,
+              last_login: new Date(),
+              last_login_ip: ipAddress,
+            },
+          });
+        });
+      });
+    });
+  } catch (error) {
+    console.error("Internal error:", error.message);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Admin Dashboard: New Users per Day and Total Posts per Day
+app.get("/admin/dashboard", verifyToken, (req, res) => {
+  // Check if the logged-in user is an admin
+  if (req.role !== "admin") {
+    return res.status(403).json({ error: "Unauthorized access" });
+  }
+
+  // Query to get new users count per day and total users
+  const newUsersQuery = `
+    SELECT 
+      DATE(created_at) AS date, 
+      COUNT(*) AS new_users 
+    FROM users 
+    WHERE role = 'user'
+    GROUP BY DATE(created_at)
+    ORDER BY DATE(created_at) DESC;
+  `;
+
+  // Query to get total posts per day and total posts
+  const totalPostsQuery = `
+    SELECT 
+      DATE(updated_at) AS date, 
+      COUNT(*) AS total_posts 
+    FROM posts
+    GROUP BY DATE(updated_at)
+    ORDER BY DATE(updated_at) DESC;
+  `;
+
+  // Execute both queries in parallel
+  pool.query(newUsersQuery, (newUsersError, newUsersResults) => {
+    if (newUsersError) {
+      console.error("Database error fetching new users:", newUsersError);
+      return res.status(500).json({ error: "Error fetching new users data" });
+    }
+
+    pool.query(totalPostsQuery, (totalPostsError, totalPostsResults) => {
+      if (totalPostsError) {
+        console.error("Database error fetching total posts:", totalPostsError);
+        return res.status(500).json({ error: "Error fetching total posts data" });
+      }
+
+      // Send the response with both sets of data
+      res.json({
+        new_users_per_day: newUsersResults,
+        total_posts_per_day: totalPostsResults,
+      });
+    });
+  });
+});
+>>>>>>> 659358768288dbd137f5c0bbc56cc10ea5c4fab2
+
 
 // Start the server
 const PORT = process.env.PORT || 3000;
