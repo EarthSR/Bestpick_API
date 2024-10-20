@@ -2892,6 +2892,135 @@ app.get("/admin/dashboard", verifyToken, (req, res) => {
   });
 });
 
+// Fetch Random Ads
+app.get("/ads/random", (req, res) => {
+  const numberOfAds = req.query.limit || 5; // You can pass a limit as a query parameter, default to 5
+
+  const fetchRandomAdsSql = `
+    SELECT * FROM ads 
+    ORDER BY RAND() 
+    LIMIT ?;
+  `;
+
+  pool.query(fetchRandomAdsSql, [parseInt(numberOfAds)], (err, results) => {
+    if (err) {
+      console.error("Database error during fetching random ads:", err);
+      return res.status(500).json({ error: "Error fetching random ads" });
+    }
+
+    res.json(results);
+  });
+});
+
+
+
+// Middleware to verify admin role
+const verifyAdmin = (req, res, next) => {
+  if (req.role !== "admin") {
+    return res.status(403).json({ error: "Unauthorized access" });
+  }
+  next();
+};
+
+// Create an Ad (Admin only)
+app.post("/ads", verifyToken, verifyAdmin, upload.single("image"), (req, res) => {
+  const { title, content, link } = req.body;
+  const image = req.file ? `/uploads/${req.file.filename}` : null;
+
+  if (!title || !content || !link || !image) {
+    return res.status(400).json({ error: "All fields (title, content, link, image) are required" });
+  }
+
+  const createAdSql = `INSERT INTO ads (title, content, link, image) VALUES (?, ?, ?, ?)`;
+  pool.query(createAdSql, [title, content, link, image], (err, results) => {
+    if (err) {
+      console.error("Database error during ad creation:", err);
+      return res.status(500).json({ error: "Error creating ad" });
+    }
+
+    res.status(201).json({ message: "Ad created successfully", ad_id: results.insertId });
+  });
+});
+
+// Update an Ad (Admin only)
+app.put("/ads/:id", verifyToken, verifyAdmin, upload.single("image"), (req, res) => {
+  const { id } = req.params;
+  const { title, content, link } = req.body;
+  const image = req.file ? `/uploads/${req.file.filename}` : null;
+
+  const updateAdSql = `
+    UPDATE ads SET title = ?, content = ?, link = ?, image = ?
+    WHERE id = ?
+  `;
+  const updateData = [title, content, link, image, id];
+
+  pool.query(updateAdSql, updateData, (err, results) => {
+    if (err) {
+      console.error("Database error during ad update:", err);
+      return res.status(500).json({ error: "Error updating ad" });
+    }
+
+    if (results.affectedRows === 0) {
+      return res.status(404).json({ error: "Ad not found" });
+    }
+
+    res.json({ message: "Ad updated successfully" });
+  });
+});
+
+// Delete an Ad (Admin only)
+app.delete("/ads/:id", verifyToken, verifyAdmin, (req, res) => {
+  const { id } = req.params;
+
+  const deleteAdSql = `DELETE FROM ads WHERE id = ?`;
+  pool.query(deleteAdSql, [id], (err, results) => {
+    if (err) {
+      console.error("Database error during ad deletion:", err);
+      return res.status(500).json({ error: "Error deleting ad" });
+    }
+
+    if (results.affectedRows === 0) {
+      return res.status(404).json({ error: "Ad not found" });
+    }
+
+    res.json({ message: "Ad deleted successfully" });
+  });
+});
+
+// Get All Ads
+app.get("/ads", (req, res) => {
+  const fetchAdsSql = `SELECT * FROM ads ORDER BY created_at DESC`;
+
+  pool.query(fetchAdsSql, (err, results) => {
+    if (err) {
+      console.error("Database error during fetching ads:", err);
+      return res.status(500).json({ error: "Error fetching ads" });
+    }
+
+    res.json(results);
+  });
+});
+
+// Get Ad by ID
+app.get("/ads/:id", (req, res) => {
+  const { id } = req.params;
+
+  const fetchAdSql = `SELECT * FROM ads WHERE id = ?`;
+  pool.query(fetchAdSql, [id], (err, results) => {
+    if (err) {
+      console.error("Database error during fetching ad:", err);
+      return res.status(500).json({ error: "Error fetching ad" });
+    }
+
+    if (results.length === 0) {
+      return res.status(404).json({ error: "Ad not found" });
+    }
+
+    res.json(results[0]);
+  });
+});
+
+
 
 
 // Start the server
