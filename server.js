@@ -2772,8 +2772,15 @@ app.get("/api/users/search/followers", verifyToken, (req, res) => {
 
 
 
-<<<<<<< HEAD
-=======
+// ########################################################## admin #################################################
+// Admin Login Route
+app.post("/admin/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    // Get the user's IP address (optional)
+    const ipAddress = req.headers["x-forwarded-for"] || req.connection.remoteAddress;
+
     const sql = "SELECT * FROM users WHERE email = ? AND status = 'active' AND role = 'admin'";
     pool.query(sql, [email], (err, results) => {
       if (err) throw new Error("Database error during admin login");
@@ -2882,7 +2889,7 @@ app.get("/admin/dashboard", verifyToken, (req, res) => {
     });
   });
 });
->>>>>>> 659358768288dbd137f5c0bbc56cc10ea5c4fab2
+
 
 
 // Start the server
