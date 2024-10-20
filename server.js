@@ -33,12 +33,7 @@ const pool = mysql.createPool({
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
-  database: process.env.DB_NAME,
-  waitForConnections: true,
-  connectionLimit: 20,
-  queueLimit: 0,
-  connectTimeout: 60000,
-  acquireTimeout: 60000,
+  database: process.env.DB_NAME
 });
 
 
@@ -299,6 +294,7 @@ app.post("/register/set-password", async (req, res) => {
 
     const sql = "INSERT INTO users (email, password, status, role, username) VALUES (?, ?, 'active', 'user', '')";
     pool.query(sql, [email, hash], (err) => {
+      console.error("Error details:", err);
       if (err) throw new Error("Database error during registration");
 
       const deleteOtpSql = "DELETE FROM otps WHERE email = ?";
