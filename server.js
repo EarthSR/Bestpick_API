@@ -41,7 +41,7 @@ const pool = mysql.createPool({
   connectTimeout: 60000,
   acquireTimeout: 60000,
   ssl: {
-    rejectUnauthorized: true, // กำหนดว่าเซิร์ฟเวอร์ต้องมีใบรับรองที่น่าเชื่อถือ
+    rejectUnauthorized: false, // กำหนดว่าเซิร์ฟเวอร์ต้องมีใบรับรองที่น่าเชื่อถือ
     ca: fs.readFileSync("./certs/isrgrootx1.pem"), // เพิ่มไฟล์ใบรับรอง
   },
 });
@@ -2706,11 +2706,9 @@ app.get("/api/users/followers/:userId", (req, res) => {
 });
 
 
-
-
-// Real-time Search Following by Username with Query Parameter
 app.get("/api/users/search/following", verifyToken, (req, res) => {
   const { query } = req.query; // รับคำค้นหาจาก query parameter
+  const followerId = req.userId; // รับ follower_id จาก token ของผู้ใช้ที่ล็อกอิน
 
   if (!query || query.trim() === "") {
     return res.status(400).json({ error: "Search query is required" });
@@ -2725,25 +2723,52 @@ app.get("/api/users/search/following", verifyToken, (req, res) => {
       u.picture AS profileImageUrl
     FROM follower_following f
     JOIN users u ON f.following_id = u.id
-    WHERE LOWER(u.username) LIKE ?;
+    WHERE f.follower_id = ? AND LOWER(u.username) LIKE ?;
   `;
 
-  pool.query(searchFollowingSql, [searchValue], (err, results) => {
+  pool.query(searchFollowingSql, [followerId, searchValue], (err, results) => {
     if (err) {
-      console.error("Database error during following search:", err);
+      console.error("Database error during following search:", err.message || err);
       return res.status(500).json({ error: "Error fetching following" });
     }
 
-    if (results.length === 0) {
-      return res.status(404).json({ message: "No following found" });
-    }
-
-    res.json(results);
+    // ส่งกลับ array ว่างหากไม่พบผลลัพธ์
+    res.status(200).json(results || []);
   });
 });
 
 
 
+app.get("/api/users/search/followers", verifyToken, (req, res) => {
+  const { query } = req.query; // รับคำค้นหาจาก query parameter
+  const followingId = req.userId; // รับ following_id จาก token ของผู้ใช้ที่ล็อกอิน (คนที่ถูกติดตาม)
+
+  if (!query || query.trim() === "") {
+    return res.status(400).json({ error: "Search query is required" });
+  }
+
+  const searchValue = `%${query.trim().toLowerCase()}%`; // แปลงคำค้นหาเป็นรูปแบบ LIKE
+
+  const searchFollowersSql = `
+    SELECT 
+      u.id AS userId, 
+      u.username, 
+      u.picture AS profileImageUrl
+    FROM follower_following f
+    JOIN users u ON f.follower_id = u.id
+    WHERE f.following_id = ? AND LOWER(u.username) LIKE ?;
+  `;
+
+  pool.query(searchFollowersSql, [followingId, searchValue], (err, results) => {
+    if (err) {
+      console.error("Database error during followers search:", err.message || err);
+      return res.status(500).json({ error: "Error fetching followers" });
+    }
+
+    // ส่งกลับ array ว่างหากไม่พบผลลัพธ์
+    res.status(200).json(results || []);
+  });
+});
 
 
 // Start the server
