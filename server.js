@@ -1438,10 +1438,10 @@ app.get("/search", (req, res) => {
     return res.status(400).json({ error: "Search query is required" });
   }
 
-  // Trim the query to remove any leading/trailing spaces and convert it to lowercase
+  // Trim the query and convert to lowercase
   const searchValue = `%${query.trim().toLowerCase()}%`;
 
-  // SQL query to search posts by content, title, or username, and include user_id, post_id, title, and photo_url
+  // SQL query to search users and posts
   const searchSql = `
     SELECT 
       u.id AS user_id,                -- Include user ID
@@ -1476,84 +1476,58 @@ app.get("/search", (req, res) => {
       const groupedResults = results.reduce((acc, post) => {
         const username = post.username;
 
-        // ตรวจสอบประเภทของ photo_url และแปลงเป็นสตริงถ้าจำเป็น
-        let photoUrlString = "";
-        if (post.photo_url) {
-          // กรณี photo_url เป็น object เช่น ถูกดึงมาเป็น JSON object แทน string
-          if (typeof post.photo_url === "object") {
-
-            // ลองแปลงเป็นสตริง JSON
-            try {
-              photoUrlString = JSON.stringify(post.photo_url);
-            } catch (e) {
-              photoUrlString = ""; // ถ้าไม่สามารถแปลงได้ ให้เป็นค่าว่าง
-            }
-          } else if (Buffer.isBuffer(post.photo_url)) {
-            photoUrlString = post.photo_url.toString(); // แปลง Buffer เป็นสตริง
-          } else if (typeof post.photo_url === "string") {
-            photoUrlString = post.photo_url; // หากเป็นสตริงอยู่แล้วให้ใช้ได้เลย
-          } else {
-            console.warn(
-              `Unexpected type for photo_url: ${typeof post.photo_url}`
-            );
-          }
-        }
-
-        // ตรวจสอบและแปลง photo_url ที่เป็นสตริงให้อยู่ในรูปแบบอาร์เรย์
-        let firstPhotoUrl = "";
-        try {
-          // ตรวจสอบว่า photo_url เป็น JSON Array หรือไม่
-          if (photoUrlString.startsWith("[") && photoUrlString.endsWith("]")) {
-            // ถ้าเป็น JSON Array, ใช้ JSON.parse
-            const photoArray = JSON.parse(photoUrlString);
-            if (Array.isArray(photoArray) && photoArray.length > 0) {
-              firstPhotoUrl = photoArray[0]; // ดึงเฉพาะรูปภาพแรกจากอาร์เรย์
-            }
-          } else {
-            // ถ้า photo_url เป็นสตริงธรรมดาที่คั่นด้วยจุลภาค
-            const photoArray = photoUrlString.split(",");
-            firstPhotoUrl = photoArray[0]; // ดึงเฉพาะรูปภาพแรกจากการแยกสตริง
-          }
-        } catch (e) {
-          firstPhotoUrl = ""; // กรณีที่ photo_url ไม่สามารถแปลงได้ ให้เป็นค่าว่าง
-        }
+        // ตรวจสอบว่ามีโพสต์หรือไม่
+        const hasPost = post.post_id !== null;
 
         // Check if the username already exists in the accumulator (grouped results)
         const existingUser = acc.find((user) => user.username === username);
 
         if (existingUser) {
-          // If the username exists, add the post information to their posts array
-          existingUser.posts.push({
-            post_id: post.post_id, // Add post_id to the post object
-            title: post.title, // Include title in the post object
-            content_preview: post.content_preview,
-            photo_url: firstPhotoUrl, // Include only the first photo_url
-          });
+          // ถ้ามีโพสต์ ให้เพิ่มข้อมูลโพสต์
+          if (hasPost) {
+            existingUser.posts.push({
+              post_id: post.post_id,
+              title: post.title,
+              content_preview: post.content_preview,
+              photo_url: post.photo_url || "",
+            });
+          }
         } else {
-          // If the username does not exist, create a new entry for the user
+          // ถ้าไม่มีโพสต์ แสดงเฉพาะข้อมูลผู้ใช้
           acc.push({
-            user_id: post.user_id, // Include user_id in the user object
+            user_id: post.user_id,
             username: post.username,
             profile_image: post.picture,
-            posts: [
-              {
-                post_id: post.post_id, // Add post_id to the post object
-                title: post.title, // Include title in the post object
-                content_preview: post.content_preview,
-                photo_url: firstPhotoUrl, // Include only the first photo_url
-              },
-            ],
+            posts: hasPost
+              ? [
+                  {
+                    post_id: post.post_id,
+                    title: post.title,
+                    content_preview: post.content_preview,
+                    photo_url: post.photo_url || "",
+                  },
+                ]
+              : undefined, // ไม่ต้องมี posts ถ้าไม่มีโพสต์
           });
         }
 
         return acc;
-      }, []); // Start with an empty array for grouping
+      }, []);
 
       // ส่งข้อมูล groupedResults กลับในรูปแบบ JSON
-      res.json({ results: groupedResults });
+      res.json({
+        results: groupedResults.map((user) => {
+          // ลบ posts ถ้าไม่มีโพสต์
+          if (!user.posts) {
+            delete user.posts;
+          }
+          return user;
+        }),
+      });
     }
   );
 });
+
 
 app.get("/api/users/:userId/profile", verifyToken, (req, res) => {
   const userId = req.params.userId;
