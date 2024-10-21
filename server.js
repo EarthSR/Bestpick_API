@@ -1063,11 +1063,14 @@ app.get("/posts/:id", verifyToken, (req, res) => {
           .status(500)
           .json({ error: "Internal server error during post retrieval" });
       }
+
       if (postResults.length === 0) {
         return res.status(404).json({ error: "Post not found" });
       }
 
       const post = postResults[0];
+      console.log("Post data fetched:", post); // เพิ่ม log เพื่อตรวจสอบข้อมูลโพสต์
+
       post.photo_url = isValidJson(post.photo_url)
         ? JSON.parse(post.photo_url)
         : [post.photo_url];
@@ -1083,6 +1086,8 @@ app.get("/posts/:id", verifyToken, (req, res) => {
             .status(500)
             .json({ error: "Internal server error during comments retrieval" });
         }
+
+        console.log("Comment data fetched:", commentResults); // เพิ่ม log เพื่อตรวจสอบข้อมูลคอมเมนต์
 
         res.json({
           ...post,
@@ -1107,6 +1112,7 @@ app.get("/posts/:id", verifyToken, (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 });
+
 
 
 
@@ -1176,76 +1182,80 @@ app.post(
 
 
 // Update a Post
-app.put(
-  "/posts/:id",
-  verifyToken,
-  upload.fields([
-    { name: "photo", maxCount: 10 },
-    { name: "video", maxCount: 10 },
-  ]),
-  (req, res) => {
-    try {
+app.put("/posts/:id", verifyToken, upload.fields([
+  { name: "photo", maxCount: 10 },
+  { name: "video", maxCount: 10 },
+]), (req, res) => {
+  try {
       const { id } = req.params;
-      const { content, user_id } = req.body;
+      const { Title, content, ProductName, CategoryID, user_id, existing_photos = [], existing_videos = [] } = req.body;
+
       let photo_urls = [];
       let video_urls = [];
 
-      // Ensure the user is updating their own post
       if (parseInt(req.userId) !== parseInt(user_id)) {
-        return res
-          .status(403)
-          .json({ error: "You are not authorized to update this post" });
+          return res.status(403).json({ error: "You are not authorized to update this post" });
       }
 
-      // Get uploaded photo URLs
+      if (Array.isArray(existing_photos)) {
+          photo_urls = [...existing_photos];
+      }
+
+      if (Array.isArray(existing_videos)) {
+          video_urls = [...existing_videos];
+      }
+
       if (req.files["photo"]) {
-        photo_urls = req.files["photo"].map(
-          (file) => `/uploads/${file.filename}`
-        );
+          const new_photos = req.files["photo"].map(file => `/uploads/${file.filename}`);
+          photo_urls = [...photo_urls, ...new_photos];
       }
 
-      // Get uploaded video URLs
       if (req.files["video"]) {
-        video_urls = req.files["video"].map(
-          (file) => `/uploads/${file.filename}`
-        );
+          const new_videos = req.files["video"].map(file => `/uploads/${file.filename}`);
+          video_urls = [...video_urls, ...new_videos];
       }
 
-      // Convert arrays to JSON strings for storage
       const photo_urls_json = JSON.stringify(photo_urls);
       const video_urls_json = JSON.stringify(video_urls);
 
-      const query =
-        "UPDATE posts SET content = ?, video_url = ?, photo_url = ?, updated_at = NOW() WHERE post_id = ? AND user_id = ?";
-      pool.query(
-        query,
-        [content, video_urls_json, photo_urls_json, id, user_id],
-        (err, results) => {
+      const categoryID = CategoryID === 'NULL' ? null : CategoryID;
+
+      const query = `
+          UPDATE posts
+          SET Title = ?, content = ?, ProductName = ?, CategoryID = ?, video_url = ?, photo_url = ?, updated_at = NOW()
+          WHERE id = ? AND user_id = ?
+      `;
+
+      pool.query(query, [Title, content, ProductName, categoryID, video_urls_json, photo_urls_json, id, user_id], (err, results) => {
           if (err) {
-            console.error("Database error during post update:", err);
-            return res
-              .status(500)
-              .json({ error: "Database error during post update" });
+              console.error("Database error during post update:", err.message);
+              return res.status(500).json({ error: "Database error during post update" });
           }
+
           if (results.affectedRows === 0) {
-            return res
-              .status(404)
-              .json({ error: "Post not found or you are not the owner" });
+              return res.status(404).json({ error: "Post not found or you are not the owner" });
           }
+
           res.json({
-            post_id: id,
-            content,
-            video_urls: video_urls,
-            photo_urls: photo_urls,
+              post_id: id,
+              Title,
+              content,
+              ProductName,
+              CategoryID: categoryID,
+              video_urls: video_urls,
+              photo_urls: photo_urls,
           });
-        }
-      );
-    } catch (error) {
+      });
+  } catch (error) {
       console.error("Internal server error:", error.message);
       res.status(500).json({ error: "Internal server error" });
-    }
   }
-);
+});
+
+
+
+
+
 
 // Delete a Post
 app.delete("/posts/:id", verifyToken, (req, res) => {
