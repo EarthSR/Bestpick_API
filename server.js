@@ -2876,17 +2876,14 @@ app.get("/admin/dashboard", verifyToken, (req, res) => {
   });
 });
 
-// Fetch Random Ads
+// Fetch All Ads in Random Order
 app.get("/ads/random", (req, res) => {
-  const numberOfAds = req.query.limit || 5; // You can pass a limit as a query parameter, default to 5
-
   const fetchRandomAdsSql = `
     SELECT * FROM ads 
-    ORDER BY RAND() 
-    LIMIT ?;
+    ORDER BY RAND();
   `;
 
-  pool.query(fetchRandomAdsSql, [parseInt(numberOfAds)], (err, results) => {
+  pool.query(fetchRandomAdsSql, (err, results) => {
     if (err) {
       console.error("Database error during fetching random ads:", err);
       return res.status(500).json({ error: "Error fetching random ads" });
@@ -2895,6 +2892,7 @@ app.get("/ads/random", (req, res) => {
     res.json(results);
   });
 });
+
 
 
 
