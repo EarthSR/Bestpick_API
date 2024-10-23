@@ -8,6 +8,8 @@ import time
 import os
 import threading
 import re
+import joblib
+import pandas as pd
 
 app = Flask(__name__)
 
@@ -137,6 +139,71 @@ def search_product():
         thread.join()
 
     return jsonify(results)
+
+# โหลดโมเดล SVD และ TF-IDF พร้อมกับ cosine similarity
+collaborative_model = joblib.load('collaborative_model.pkl')
+tfidf = joblib.load('tfidf_model.pkl')
+tfidf_matrix = joblib.load('tfidf_matrix.pkl')
+cosine_sim = joblib.load('cosine_similarity.pkl')
+
+# โหลดข้อมูล
+data = pd.read_csv('clean_new.csv')
+
+# ฟังก์ชันสำหรับแนะนำโพสต์ตามเนื้อหาที่คล้ายกัน
+def content_based_recommendations(post_id, cosine_sim=cosine_sim):
+    try:
+        idx = data.index[data['post_id'] == post_id][0]
+        sim_scores = list(enumerate(cosine_sim[idx]))
+        sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
+        sim_scores = sim_scores[1:11]  # แนะนำโพสต์ที่คล้ายที่สุด 10 อันดับแรก
+        post_indices = [i[0] for i in sim_scores]
+        return data['post_id'].iloc[post_indices]
+    except IndexError:
+        return []
+
+# ฟังก์ชัน Hybrid สำหรับแนะนำโพสต์
+def hybrid_recommendations(user_id, post_id, alpha=0.7):
+    collab_pred = collaborative_model.predict(user_id, post_id).est
+    content_recs = content_based_recommendations(post_id)
+    
+    # พิมพ์ผลลัพธ์แต่ละส่วนออกมา
+    print(f"Collaborative score for post {post_id}: {collab_pred}")
+    content_pred = 1 if post_id in content_recs else 0
+    print(f"Content score for post {post_id}: {content_pred}")
+    
+    final_score = alpha * collab_pred + (1 - alpha) * content_pred
+    return final_score
+
+
+# ฟังก์ชันสำหรับแนะนำโพสต์ให้ผู้ใช้ โดยเรียงลำดับโพสต์ตามคะแนนจากมากไปน้อย
+def recommend_posts_for_user(user_id, alpha=0.7):
+    post_scores = []
+    
+    # วนผ่านโพสต์ทั้งหมดเพื่อคำนวณคะแนนการแนะนำ
+    for post_id in data['post_id'].unique():
+        score = hybrid_recommendations(user_id, post_id, alpha=alpha)
+        post_scores.append((int(post_id), score))  # แปลง post_id เป็น int เพื่อความปลอดภัยในการ serialize
+    
+    # เรียงลำดับโพสต์ตามคะแนนจากมากไปน้อย
+    post_scores = sorted(post_scores, key=lambda x: x[1], reverse=True)
+    
+    return post_scores
+
+# API endpoint สำหรับแนะนำโพสต์ให้ผู้ใช้
+@app.route('/recommend', methods=['POST'])
+def recommend():
+    user_id = request.json.get('user_id')
+    
+    # ตรวจสอบว่า user_id มีอยู่หรือไม่
+    if user_id is None:
+        return jsonify({"error": "user_id is required"}), 400
+    
+    # แสดงทุกโพสต์ที่เรียงตามคะแนนมากไปน้อย
+    recommended_posts = recommend_posts_for_user(user_id)
+    
+    # ส่งกลับเป็น JSON
+    recommendations = [{"post_id": post_id, "score": score} for post_id, score in recommended_posts]
+    return jsonify({"recommendations": recommendations})
 
 
 if __name__ == '__main__':
