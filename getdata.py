@@ -10,13 +10,13 @@ connection = mysql.connector.connect(
 )
 
 # ดึงข้อมูลจากฐานข้อมูล
-query = "SELECT * FROM clean_new;"
+query = "SELECT * FROM clean_new_view;"
 df = pd.read_sql(query, connection)
 
 
 
 # ส่งออกข้อมูลเป็น CSV
-df.to_csv('clean_new.csv', index=False)
+df.to_csv('clean_new_view.csv', index=False)
 
 
 # ปิดการเชื่อมต่อ

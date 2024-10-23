@@ -10,7 +10,7 @@ import threading
 import re
 import joblib
 import pandas as pd
-
+from sqlalchemy import create_engine
 app = Flask(__name__)
 
 # Set up Selenium driver
@@ -146,43 +146,70 @@ tfidf = joblib.load('tfidf_model.pkl')
 tfidf_matrix = joblib.load('tfidf_matrix.pkl')
 cosine_sim = joblib.load('cosine_similarity.pkl')
 
-# โหลดข้อมูล
-data = pd.read_csv('clean_new.csv')
+def load_data_from_db():
+    # สร้าง engine สำหรับ SQLAlchemy
+    engine = create_engine('mysql+mysqlconnector://root:1234@localhost/ReviewAPP')
+    
+    # ดึงข้อมูลจากฐานข้อมูล
+    query = "SELECT * FROM clean_new_view;"
+    data = pd.read_sql(query, con=engine)  
+    return data
 
 # ฟังก์ชันสำหรับแนะนำโพสต์ตามเนื้อหาที่คล้ายกัน
-def content_based_recommendations(post_id, cosine_sim=cosine_sim):
+def content_based_recommendations(post_id, user_id, cosine_sim=cosine_sim):
+    data = load_data_from_db()  # โหลดข้อมูลใหม่ทุกครั้ง
     try:
         idx = data.index[data['post_id'] == post_id][0]
         sim_scores = list(enumerate(cosine_sim[idx]))
         sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
         sim_scores = sim_scores[1:11]  # แนะนำโพสต์ที่คล้ายที่สุด 10 อันดับแรก
         post_indices = [i[0] for i in sim_scores]
+        
+        # ตรวจสอบโพสต์ที่คล้ายกัน
+        print(f"Post ID: {post_id}, Similar Posts: {data['post_id'].iloc[post_indices].values}")
+        
         return data['post_id'].iloc[post_indices]
     except IndexError:
         return []
 
 # ฟังก์ชัน Hybrid สำหรับแนะนำโพสต์
 def hybrid_recommendations(user_id, post_id, alpha=0.7):
+    # คาดการณ์จาก collaborative filtering
     collab_pred = collaborative_model.predict(user_id, post_id).est
-    content_recs = content_based_recommendations(post_id)
     
-    # พิมพ์ผลลัพธ์แต่ละส่วนออกมา
+    # คาดการณ์จาก content-based filtering
+    content_recs = content_based_recommendations(post_id, user_id)  # ส่ง user_id เข้าไป
+    
+    # แสดงผลลัพธ์การคำนวณคะแนนทั้งสองส่วน
     print(f"Collaborative score for post {post_id}: {collab_pred}")
     content_pred = 1 if post_id in content_recs else 0
     print(f"Content score for post {post_id}: {content_pred}")
     
+    # คำนวณคะแนนสุดท้ายโดยถ่วงน้ำหนัก
     final_score = alpha * collab_pred + (1 - alpha) * content_pred
-    return final_score
-
+    
+    # ส่งกลับ post_id พร้อมกับคะแนนสุดท้าย
+    return {"post_id": post_id, "final_score": final_score}
 
 # ฟังก์ชันสำหรับแนะนำโพสต์ให้ผู้ใช้ โดยเรียงลำดับโพสต์ตามคะแนนจากมากไปน้อย
 def recommend_posts_for_user(user_id, alpha=0.7):
+    data = load_data_from_db()  # โหลดข้อมูลใหม่ทุกครั้ง
     post_scores = []
+    
+    # ตรวจสอบข้อมูลใน DataFrame
+    print("DataFrame Preview:")
+    print(data[['post_id', 'post_content', 'category_name']].head(10))
+    
+    # ตรวจสอบขนาดของ TF-IDF Matrix
+    print("TF-IDF Matrix Shape:", tfidf_matrix.shape)
+    
+    # ตรวจสอบค่า Cosine Similarity
+    print("Cosine Similarity Sample:", cosine_sim[:5, :5])  # ดูค่าบางส่วน
     
     # วนผ่านโพสต์ทั้งหมดเพื่อคำนวณคะแนนการแนะนำ
     for post_id in data['post_id'].unique():
         score = hybrid_recommendations(user_id, post_id, alpha=alpha)
-        post_scores.append((int(post_id), score))  # แปลง post_id เป็น int เพื่อความปลอดภัยในการ serialize
+        post_scores.append((int(score['post_id']), float(score['final_score'])))  # แปลงเป็น int และ float เพื่อความปลอดภัยในการ serialize
     
     # เรียงลำดับโพสต์ตามคะแนนจากมากไปน้อย
     post_scores = sorted(post_scores, key=lambda x: x[1], reverse=True)
@@ -192,17 +219,19 @@ def recommend_posts_for_user(user_id, alpha=0.7):
 # API endpoint สำหรับแนะนำโพสต์ให้ผู้ใช้
 @app.route('/recommend', methods=['POST'])
 def recommend():
-    user_id = request.json.get('user_id')
+    user_id = request.json.get('user_id')  # รับค่า user_id
     
     # ตรวจสอบว่า user_id มีอยู่หรือไม่
     if user_id is None:
         return jsonify({"error": "user_id is required"}), 400
     
-    # แสดงทุกโพสต์ที่เรียงตามคะแนนมากไปน้อย
-    recommended_posts = recommend_posts_for_user(user_id)
+    # โหลดข้อมูลใหม่ทุกครั้งที่มีการเรียก API
+    post_scores = recommend_posts_for_user(user_id)  # แนะนำโพสต์ให้ผู้ใช้
+    
+    # สร้างผลลัพธ์สำหรับ JSON
+    recommendations = [{"post_id": post_id, "score": score} for post_id, score in post_scores]
     
     # ส่งกลับเป็น JSON
-    recommendations = [{"post_id": post_id, "score": score} for post_id, score in recommended_posts]
     return jsonify({"recommendations": recommendations})
 
 
