@@ -8,9 +8,22 @@ import time
 import os
 import threading
 import re
+import traceback
+from datetime import datetime, timezone
+import json
 import joblib
 import pandas as pd
 from sqlalchemy import create_engine
+from sqlalchemy.sql import text 
+from flask_sqlalchemy import SQLAlchemy
+from jwt import ExpiredSignatureError, InvalidTokenError
+import os
+from dotenv import load_dotenv
+import jwt
+from functools import wraps
+from flask import request, jsonify
+from jwt import ExpiredSignatureError, InvalidTokenError
+
 app = Flask(__name__)
 
 # Set up Selenium driver
@@ -216,23 +229,122 @@ def recommend_posts_for_user(user_id, alpha=0.7):
     
     return post_scores
 
+# Configure your database URI
+app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+mysqlconnector://root:1234@localhost/ReviewAPP'
+
+# Initialize the SQLAlchemy object
+db = SQLAlchemy(app)
 # API endpoint สำหรับแนะนำโพสต์ให้ผู้ใช้
+load_dotenv()
+# Secret key for encoding/decoding JWT tokens (make sure to keep it secure)
+JWT_SECRET = os.getenv('JWT_SECRET')
+
+def verify_token(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        # Get the Authorization header
+        auth_header = request.headers.get("Authorization")
+
+        if not auth_header or not auth_header.startswith("Bearer "):
+            return jsonify({"error": "No token provided or incorrect format"}), 403
+
+        # Extract the token part from "Bearer <token>"
+        token = auth_header.split(" ")[1]
+
+        try:
+            # Decode the token using JWT_SECRET
+            decoded = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+            # Add user ID and role to the request context
+            request.user_id = decoded.get("id")
+            request.role = decoded.get("role")
+        except jwt.ExpiredSignatureError:
+            return jsonify({"error": "Unauthorized: Token has expired"}), 401
+        except jwt.InvalidTokenError:
+            return jsonify({"error": "Unauthorized: Invalid token"}), 401
+
+        return f(*args, **kwargs)
+
+    return decorated_function
+
+
+# Example of using the token verification in a route
 @app.route('/recommend', methods=['POST'])
+@verify_token  # Apply the verify_token decorator to this route
 def recommend():
-    user_id = request.json.get('user_id')  # รับค่า user_id
+    user_id = request.user_id  # Access the decoded user_id from the token
+    user_role = request.role   # Access the decoded role from the token
     
-    # ตรวจสอบว่า user_id มีอยู่หรือไม่
-    if user_id is None:
-        return jsonify({"error": "user_id is required"}), 400
-    
-    # โหลดข้อมูลใหม่ทุกครั้งที่มีการเรียก API
-    post_scores = recommend_posts_for_user(user_id)  # แนะนำโพสต์ให้ผู้ใช้
-    
-    # สร้างผลลัพธ์สำหรับ JSON
-    recommendations = [{"post_id": post_id, "score": score} for post_id, score in post_scores]
-    
-    # ส่งกลับเป็น JSON
-    return jsonify({"recommendations": recommendations})
+    # Proceed with the function logic, now with the verified token
+    post_scores = recommend_posts_for_user(user_id)
+
+    if not post_scores:
+        return jsonify({"error": "No recommendations found"}), 404
+
+    post_ids = [post_id for post_id, _ in post_scores]
+
+    try:
+        if not post_ids:
+            return jsonify({"error": "No post IDs available"}), 404
+
+        # Dynamically construct the placeholders for the IN clause
+        placeholders = ', '.join([f':id_{i}' for i in range(len(post_ids))])
+        query = text(f"""
+            SELECT posts.*, users.username, users.picture, 
+                   (SELECT COUNT(*) FROM likes WHERE post_id = posts.id AND user_id = :user_id) AS is_liked
+            FROM posts 
+            JOIN users ON posts.user_id = users.id
+            WHERE posts.status = 'active'
+              AND posts.id IN ({placeholders})
+        """)
+
+        # Prepare the parameters for the query
+        params = {'user_id': user_id}
+        for i, post_id in enumerate(post_ids):
+            params[f'id_{i}'] = post_id
+
+        # Execute the query with dynamically bound parameters
+        result = db.session.execute(query, params).fetchall()
+
+        # Convert result rows to dictionaries using _mapping
+        posts = [row._mapping for row in result]
+
+        recommendations = []
+        for post in posts:
+            score = next((score for post_id, score in post_scores if post_id == post['id']), None)
+
+            # Parse JSON fields if needed
+            photo_urls = json.loads(post.get('photo_url', '[]'))
+            video_urls = json.loads(post.get('video_url', '[]'))
+
+            # Format the updated_at field to ISO 8601 format without milliseconds, converting to UTC
+            updated_at = post['updated_at']
+            if isinstance(updated_at, datetime):
+                # Convert to UTC and format without milliseconds
+                updated_at_utc = updated_at.astimezone(timezone.utc).replace(microsecond=0).isoformat() + 'Z'
+            else:
+                updated_at_utc = updated_at  # If it's already a string or another type, use as is
+
+            # Construct the response object
+            recommendations.append({
+                "id": post['id'],
+                "userId": post['user_id'],
+                "title": post['Title'],
+                "content": post['content'],
+                "updated": updated_at_utc,  # Updated field in ISO 8601 format, UTC, without milliseconds
+                "photo_url": photo_urls,  # Converted to list
+                "video_url": video_urls,  # Converted to list
+                "userName": post['username'],
+                "userProfileUrl": post['picture'] if post['picture'] else None,
+                "is_liked": post['is_liked'] > 0  # Convert count to boolean
+            })
+        
+        # Return the list directly without wrapping in a dictionary
+        return jsonify(recommendations)
+
+    except Exception as error:
+        print("Error fetching recommended posts:")
+        print(traceback.format_exc())  # Print the full error traceback for debugging
+        return jsonify({"error": "Error fetching recommended posts"}), 500
 
 
 if __name__ == '__main__':
