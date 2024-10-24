@@ -2876,10 +2876,11 @@ app.get("/admin/dashboard", verifyToken, (req, res) => {
   });
 });
 
-// Fetch All Ads in Random Order
+// Fetch All Active Ads in Random Order
 app.get("/ads/random", (req, res) => {
   const fetchRandomAdsSql = `
     SELECT * FROM ads 
+    WHERE status = 'active'
     ORDER BY RAND();
   `;
 
@@ -2906,15 +2907,16 @@ const verifyAdmin = (req, res, next) => {
 
 // Create an Ad (Admin only)
 app.post("/ads", verifyToken, verifyAdmin, upload.single("image"), (req, res) => {
-  const { title, content, link } = req.body;
+  const { title, content, link, status, expiration_date } = req.body;
   const image = req.file ? `/uploads/${req.file.filename}` : null;
 
-  if (!title || !content || !link || !image) {
-    return res.status(400).json({ error: "All fields (title, content, link, image) are required" });
+  // ตรวจสอบให้แน่ใจว่าข้อมูลที่จำเป็นทั้งหมดถูกส่งมา
+  if (!title || !content || !link || !image || !status || !expiration_date) {
+    return res.status(400).json({ error: "All fields (title, content, link, image, status, expiration_date) are required" });
   }
 
-  const createAdSql = `INSERT INTO ads (title, content, link, image) VALUES (?, ?, ?, ?)`;
-  pool.query(createAdSql, [title, content, link, image], (err, results) => {
+  const createAdSql = `INSERT INTO ads (title, content, link, image, status, expiration_date) VALUES (?, ?, ?, ?, ?, ?)`;
+  pool.query(createAdSql, [title, content, link, image, status, expiration_date], (err, results) => {
     if (err) {
       console.error("Database error during ad creation:", err);
       return res.status(500).json({ error: "Error creating ad" });
@@ -2927,14 +2929,15 @@ app.post("/ads", verifyToken, verifyAdmin, upload.single("image"), (req, res) =>
 // Update an Ad (Admin only)
 app.put("/ads/:id", verifyToken, verifyAdmin, upload.single("image"), (req, res) => {
   const { id } = req.params;
-  const { title, content, link } = req.body;
+  const { title, content, link, status, expiration_date } = req.body;
   const image = req.file ? `/uploads/${req.file.filename}` : null;
 
+  // สร้าง SQL สำหรับการอัปเดต
   const updateAdSql = `
-    UPDATE ads SET title = ?, content = ?, link = ?, image = ?
+    UPDATE ads SET title = ?, content = ?, link = ?, image = ?, status = ?, expiration_date = ?
     WHERE id = ?
   `;
-  const updateData = [title, content, link, image, id];
+  const updateData = [title, content, link, image, status, expiration_date, id];
 
   pool.query(updateAdSql, updateData, (err, results) => {
     if (err) {
