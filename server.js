@@ -3003,6 +3003,125 @@ app.get("/ads/:id", (req, res) => {
 });
 
 
+// Edit user status by admin
+app.put("/admin/users/:id/status", verifyToken, verifyAdmin, (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+
+  // Validate that the status field is provided
+  if (!status) {
+    return res.status(400).json({ error: "Status is required" });
+  }
+
+  const updateStatusSql = "UPDATE users SET status = ? WHERE id = ?";
+  pool.query(updateStatusSql, [status, id], (err, results) => {
+    if (err) {
+      console.error("Database error during user status update:", err);
+      return res.status(500).json({ error: "Error updating user status" });
+    }
+
+    if (results.affectedRows === 0) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    res.json({ message: "User status updated successfully" });
+  });
+});
+
+
+// Soft Delete a User, Hard Delete their Posts, and Delete Follows (Admin-Only)
+app.delete("/admin/users/:id", verifyToken, (req, res) => {
+  const { id } = req.params;
+
+  // Only allow admins to delete users
+  if (req.role !== "admin") {
+    return res.status(403).json({ error: "Only admins are allowed to delete users." });
+  }
+
+  // First, delete all posts of the user (hard delete)
+  const deletePostsSql = "DELETE FROM posts WHERE user_id = ?";
+  pool.query(deletePostsSql, [id], (postErr, postResults) => {
+    if (postErr) {
+      console.error("Database error during post deletion:", postErr);
+      return res.status(500).json({ error: "Database error during post deletion" });
+    }
+
+    // Next, delete all follows of the user (both following and followers)
+    const deleteFollowsSql = "DELETE FROM follower_following WHERE follower_id = ? OR following_id = ?";
+    pool.query(deleteFollowsSql, [id, id], (followErr, followResults) => {
+      if (followErr) {
+        console.error("Database error during follow deletion:", followErr);
+        return res.status(500).json({ error: "Database error during follow deletion" });
+      }
+
+      // Now, soft delete the user (update status to 'deactivated')
+      const softDeleteUserSql = "UPDATE users SET status = 'deactivated' WHERE id = ?";
+      pool.query(softDeleteUserSql, [id], (userErr, userResults) => {
+        if (userErr) {
+          console.error("Database error during user soft deletion:", userErr);
+          return res.status(500).json({ error: "Database error during user soft deletion" });
+        }
+
+        if (userResults.affectedRows === 0) {
+          return res.status(404).json({ error: "User not found" });
+        }
+
+        res.json({
+          message: "User soft-deleted, their posts and follows deleted successfully",
+          deletedPostsCount: postResults.affectedRows, // Return the number of posts deleted
+          deletedFollowsCount: followResults.affectedRows // Return the number of follows deleted
+        });
+      });
+    });
+  });
+});
+
+
+
+// Update post status by admin
+app.put("/admin/posts/:id/status", verifyToken, verifyAdmin, (req, res) => {
+  const { id } = req.params;
+  const { status } = req.body;
+
+  // Validate that the status field is provided
+  if (!status) {
+    return res.status(400).json({ error: "Status is required" });
+  }
+
+  const updatePostStatusSql = "UPDATE posts SET status = ? WHERE id = ?";
+  pool.query(updatePostStatusSql, [status, id], (err, results) => {
+    if (err) {
+      console.error("Database error during post status update:", err);
+      return res.status(500).json({ error: "Error updating post status" });
+    }
+
+    if (results.affectedRows === 0) {
+      return res.status(404).json({ error: "Post not found" });
+    }
+
+    res.json({ message: "Post status updated successfully" });
+  });
+});
+
+// Delete post by admin
+app.delete("/admin/posts/:id", verifyToken, verifyAdmin, (req, res) => {
+  const { id } = req.params;
+
+  const deletePostSql = "DELETE FROM posts WHERE id = ?";
+  pool.query(deletePostSql, [id], (err, results) => {
+    if (err) {
+      console.error("Database error during post deletion:", err);
+      return res.status(500).json({ error: "Error deleting post" });
+    }
+
+    if (results.affectedRows === 0) {
+      return res.status(404).json({ error: "Post not found" });
+    }
+
+    res.json({ message: "Post deleted successfully" });
+  });
+});
+
 
 
 // Start the server
