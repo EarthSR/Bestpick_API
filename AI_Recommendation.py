@@ -8,47 +8,40 @@ import mysql.connector
 from mysql.connector import Error
 
 # สร้างการเชื่อมต่อกับฐานข้อมูล
-try:
-    connection = mysql.connector.connect(
-        host='localhost',
-        user='root',
-        password='1234',
-        database='ReviewAPP'
-    )
+def load_data_from_db():
+    try:
+        connection = mysql.connector.connect(
+            host='localhost',
+            user='root',
+            password='1234',
+            database='ReviewAPP'
+        )
 
-    # ตรวจสอบการเชื่อมต่อ
-    if connection.is_connected():
-        print("เชื่อมต่อกับฐานข้อมูลสำเร็จ")
-
-        # ดึงข้อมูลจากฐานข้อมูล
-        query = "SELECT * FROM clean_new_view;"
-        df = pd.read_sql(query, connection)
+        if connection.is_connected():
+            print("เชื่อมต่อกับฐานข้อมูลสำเร็จ")
+            query = "SELECT * FROM clean_new_view;"
+            return pd.read_sql(query, connection)
     
-except Error as e:
-    print(f"เกิดข้อผิดพลาดในการเชื่อมต่อกับฐานข้อมูล: {e}")
-finally:
-    if connection.is_connected():
-        connection.close()
-        print("ปิดการเชื่อมต่อฐานข้อมูลเรียบร้อยแล้ว")
+    except Error as e:
+        print(f"เกิดข้อผิดพลาดในการเชื่อมต่อกับฐานข้อมูล: {e}")
+        return pd.DataFrame()  # คืนค่า DataFrame ว่างถ้ามีข้อผิดพลาด
+    finally:
+        if connection.is_connected():
+            connection.close()
+            print("ปิดการเชื่อมต่อฐานข้อมูลเรียบร้อยแล้ว")
 
-# โหลดข้อมูลจากไฟล์ CSV (กรณีเชื่อมต่อฐานข้อมูลไม่ได้)
-try:
-    data = pd.read_csv('clean_new_view.csv')
-    print("โหลดข้อมูลจากไฟล์ CSV สำเร็จ")
-except FileNotFoundError:
-    print("ไม่พบไฟล์ CSV โปรดตรวจสอบตำแหน่งไฟล์")
+# โหลดข้อมูลจากฐานข้อมูล
+data = load_data_from_db()
 
 # ตรวจสอบว่าไม่มีค่า NaN ในฟีเจอร์สำคัญ
 data = data.dropna(subset=['post_content', 'category_name', 'user_age', 'total_interaction_score'])
 
-# เตรียมข้อมูลการปฏิสัมพันธ์ของผู้ใช้กับโพสต์ (SVD)
+# สร้างโมเดล SVD สำหรับ Collaborative Filtering
 reader = Reader(rating_scale=(data['total_interaction_score'].min(), data['total_interaction_score'].max()))
 interaction_data = Dataset.load_from_df(data[['user_id', 'post_id', 'total_interaction_score']], reader)
 
 # แบ่งข้อมูลเป็น train และ test
 trainset, testset = train_test_split(interaction_data, test_size=0.2)
-
-# สร้างโมเดล SVD สำหรับ Collaborative Filtering
 collaborative_model = SVD()
 collaborative_model.fit(trainset)
 
@@ -57,6 +50,9 @@ joblib.dump(collaborative_model, 'collaborative_model.pkl')
 print("Collaborative Filtering model (SVD) saved as 'collaborative_model.pkl'")
 
 # รวมเนื้อหาโพสต์, ชื่อหมวดหมู่, และอายุผู้ใช้เพื่อใช้ใน Content-Based Filtering
+data['interaction_time'] = pd.to_datetime(data['interaction_time'], errors='coerce')  # แปลงเป็น datetime
+data['interaction_time'] = data['interaction_time'].dt.strftime('%Y-%m-%d %H:%M:%S')  # แปลงเป็น string
+
 data['combined_content'] = (
     data['post_content'].fillna('') + ' ' +
     data['post_title'].fillna('') + ' ' +
@@ -68,21 +64,14 @@ data['combined_content'] = (
     data['interaction_time'].fillna('')
 )
 
-# ตรวจสอบ combined_content ว่ามีการรวมข้อมูลถูกต้องหรือไม่
-print("Sample combined_content data:")
-print(data[['post_content', 'category_name', 'user_age', 'combined_content']].head())
-
 # แปลงเนื้อหาโพสต์และหมวดหมู่เป็นเวกเตอร์โดยใช้ TF-IDF
 tfidf = TfidfVectorizer(stop_words='english', max_features=35000, ngram_range=(1, 3), min_df=2, max_df=0.8)
 tfidf_matrix = tfidf.fit_transform(data['combined_content'])
 
-# ตรวจสอบ TF-IDF matrix
-print("TF-IDF Matrix Shape:", tfidf_matrix.shape)
-
 # คำนวณ Cosine Similarity สำหรับโพสต์แต่ละอัน
 cosine_sim = cosine_similarity(tfidf_matrix, tfidf_matrix)
 
-# บันทึกโมเดล TF-IDF, เวกเตอร์ความคล้ายคลึง และ Cosine Similarity
+# บันทึกโมเดล TF-IDF และ Cosine Similarity
 joblib.dump(tfidf, 'tfidf_model.pkl')
 joblib.dump(tfidf_matrix, 'tfidf_matrix.pkl')
 joblib.dump(cosine_sim, 'cosine_similarity.pkl')

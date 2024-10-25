@@ -78,5 +78,5 @@ def recommend_posts_for_user(user_id, alpha=0.7):
     
     return post_scores
 
-recommend_posts = recommend_posts_for_user(user_id=1110001)
+recommend_posts = recommend_posts_for_user(user_id=780010)
 print(recommend_posts)
