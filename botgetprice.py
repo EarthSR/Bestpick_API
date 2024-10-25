@@ -14,15 +14,13 @@ import json
 import joblib
 import pandas as pd
 from sqlalchemy import create_engine
-from sqlalchemy.sql import text 
+from sqlalchemy.sql import text
 from flask_sqlalchemy import SQLAlchemy
-from jwt import ExpiredSignatureError, InvalidTokenError
-import os
-from dotenv import load_dotenv
 import jwt
 from functools import wraps
-from flask import request, jsonify
-from jwt import ExpiredSignatureError, InvalidTokenError
+from dotenv import load_dotenv
+import random
+
 
 app = Flask(__name__)
 
@@ -186,29 +184,23 @@ def content_based_recommendations(post_id, user_id, cosine_sim=cosine_sim):
         return []
 
 # ฟังก์ชัน Hybrid สำหรับแนะนำโพสต์
-def hybrid_recommendations(user_id, post_id, alpha=0.7):
-    # คาดการณ์จาก collaborative filtering
+def hybrid_recommendations(user_id, post_id, alpha=0.85):
+    # คาดการณ์จาก Collaborative Filtering
     collab_pred = collaborative_model.predict(user_id, post_id).est
     
-    # คาดการณ์จาก content-based filtering
-    content_recs = content_based_recommendations(post_id, user_id)  # ส่ง user_id เข้าไป
+    # เรียกใช้ Content-Based Recommendations
+    content_recs = content_based_recommendations(post_id, user_id)
+    content_pred = 0.5 if post_id in content_recs else 0
     
-    # แสดงผลลัพธ์การคำนวณคะแนนทั้งสองส่วน
-    print(f"Collaborative score for post {post_id}: {collab_pred}")
-    content_pred = 1 if post_id in content_recs else 0
-    print(f"Content score for post {post_id}: {content_pred}")
-    
-    # คำนวณคะแนนสุดท้ายโดยถ่วงน้ำหนัก
+    # คำนวณคะแนนสุดท้ายโดยให้น้ำหนักกับ Collaborative Filtering มากกว่า
     final_score = alpha * collab_pred + (1 - alpha) * content_pred
-    
-    # ส่งกลับ post_id พร้อมกับคะแนนสุดท้าย
     return {"post_id": post_id, "final_score": final_score}
 
 # ฟังก์ชันสำหรับแนะนำโพสต์ให้ผู้ใช้ โดยเรียงลำดับโพสต์ตามคะแนนจากมากไปน้อย
 def recommend_posts_for_user(user_id, alpha=0.7):
     data = load_data_from_db()  # โหลดข้อมูลใหม่ทุกครั้ง
     post_scores = []
-    
+
     # ตรวจสอบข้อมูลใน DataFrame
     print("DataFrame Preview:")
     print(data[['post_id', 'post_content', 'category_name']].head(10))
@@ -218,7 +210,7 @@ def recommend_posts_for_user(user_id, alpha=0.7):
     
     # ตรวจสอบค่า Cosine Similarity
     print("Cosine Similarity Sample:", cosine_sim[:5, :5])  # ดูค่าบางส่วน
-    
+
     # วนผ่านโพสต์ทั้งหมดเพื่อคำนวณคะแนนการแนะนำ
     for post_id in data['post_id'].unique():
         score = hybrid_recommendations(user_id, post_id, alpha=alpha)
@@ -226,6 +218,12 @@ def recommend_posts_for_user(user_id, alpha=0.7):
     
     # เรียงลำดับโพสต์ตามคะแนนจากมากไปน้อย
     post_scores = sorted(post_scores, key=lambda x: x[1], reverse=True)
+    
+    # สุ่มเลือก 10 โพสต์จากโพสต์ที่มีคะแนนสูงสุด
+    if len(post_scores) > 10:
+        post_scores = random.sample(post_scores, 10)
+    
+    print("Recommended Post Scores:", post_scores)  # แสดงผลคะแนนการแนะนำโพสต์
     
     return post_scores
 
@@ -267,84 +265,45 @@ def verify_token(f):
     return decorated_function
 
 
-# Example of using the token verification in a route
 @app.route('/recommend', methods=['POST'])
-@verify_token  # Apply the verify_token decorator to this route
+@verify_token
 def recommend():
-    user_id = request.user_id  # Access the decoded user_id from the token
-    user_role = request.role   # Access the decoded role from the token
-    
-    # Proceed with the function logic, now with the verified token
+    user_id = request.user_id
     post_scores = recommend_posts_for_user(user_id)
-
-    if not post_scores:
-        return jsonify({"error": "No recommendations found"}), 404
-
     post_ids = [post_id for post_id, _ in post_scores]
 
-    try:
-        if not post_ids:
-            return jsonify({"error": "No post IDs available"}), 404
+    if not post_ids:
+        return jsonify({"error": "No recommendations found"}), 404
 
-        # Dynamically construct the placeholders for the IN clause
-        placeholders = ', '.join([f':id_{i}' for i in range(len(post_ids))])
-        query = text(f"""
-            SELECT posts.*, users.username, users.picture, 
-                   (SELECT COUNT(*) FROM likes WHERE post_id = posts.id AND user_id = :user_id) AS is_liked
-            FROM posts 
-            JOIN users ON posts.user_id = users.id
-            WHERE posts.status = 'active'
-              AND posts.id IN ({placeholders})
-        """)
+    placeholders = ', '.join([f':id_{i}' for i in range(len(post_ids))])
+    query = text(f"""
+        SELECT posts.*, users.username, users.picture, 
+               (SELECT COUNT(*) FROM likes WHERE post_id = posts.id AND user_id = :user_id) AS is_liked
+        FROM posts 
+        JOIN users ON posts.user_id = users.id
+        WHERE posts.status = 'active' AND posts.id IN ({placeholders})
+    """)
 
-        # Prepare the parameters for the query
-        params = {'user_id': user_id}
-        for i, post_id in enumerate(post_ids):
-            params[f'id_{i}'] = post_id
+    params = {'user_id': user_id, **{f'id_{i}': post_id for i, post_id in enumerate(post_ids)}}
+    result = db.session.execute(query, params).fetchall()
+    posts = [row._mapping for row in result]
 
-        # Execute the query with dynamically bound parameters
-        result = db.session.execute(query, params).fetchall()
+    recommendations = [
+        {
+            "id": post['id'],
+            "userId": post['user_id'],
+            "title": post['Title'],
+            "content": post['content'],
+            "updated": post['updated_at'].astimezone(timezone.utc).replace(microsecond=0).isoformat() + 'Z',
+            "photo_url": json.loads(post.get('photo_url', '[]')),
+            "video_url": json.loads(post.get('video_url', '[]')),
+            "userName": post['username'],
+            "userProfileUrl": post['picture'],
+            "is_liked": post['is_liked'] > 0
+        } for post in posts
+    ]
 
-        # Convert result rows to dictionaries using _mapping
-        posts = [row._mapping for row in result]
-
-        recommendations = []
-        for post in posts:
-            score = next((score for post_id, score in post_scores if post_id == post['id']), None)
-
-            # Parse JSON fields if needed
-            photo_urls = json.loads(post.get('photo_url', '[]'))
-            video_urls = json.loads(post.get('video_url', '[]'))
-
-            # Format the updated_at field to ISO 8601 format without milliseconds, converting to UTC
-            updated_at = post['updated_at']
-            if isinstance(updated_at, datetime):
-                # Convert to UTC and format without milliseconds
-                updated_at_utc = updated_at.astimezone(timezone.utc).replace(microsecond=0).isoformat() + 'Z'
-            else:
-                updated_at_utc = updated_at  # If it's already a string or another type, use as is
-
-            # Construct the response object
-            recommendations.append({
-                "id": post['id'],
-                "userId": post['user_id'],
-                "title": post['Title'],
-                "content": post['content'],
-                "updated": updated_at_utc,  # Updated field in ISO 8601 format, UTC, without milliseconds
-                "photo_url": photo_urls,  # Converted to list
-                "video_url": video_urls,  # Converted to list
-                "userName": post['username'],
-                "userProfileUrl": post['picture'] if post['picture'] else None,
-                "is_liked": post['is_liked'] > 0  # Convert count to boolean
-            })
-        
-        # Return the list directly without wrapping in a dictionary
-        return jsonify(recommendations)
-
-    except Exception as error:
-        print("Error fetching recommended posts:")
-        print(traceback.format_exc())  # Print the full error traceback for debugging
-        return jsonify({"error": "Error fetching recommended posts"}), 500
+    return jsonify(recommendations)
 
 
 if __name__ == '__main__':

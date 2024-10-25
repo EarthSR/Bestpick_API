@@ -2756,6 +2756,20 @@ app.get("/api/users/search/followers", verifyToken, (req, res) => {
   });
 });
 
+// Endpoint to check bookmark status
+app.get('/api/bookmarks/:post_id', verifyToken, (req, res) => {
+  const post_id = req.params.post_id;
+  const user_id = req.userId;
+
+  const query = 'SELECT * FROM bookmarks WHERE user_id = ? AND post_id = ?';
+  pool.query(query, [user_id, post_id], (err, results) => {
+      if (err) {
+          return res.status(500).send({ error: 'Database error' });
+      }
+      const isBookmarked = results.length > 0;
+      res.send({ isBookmarked });
+  });
+});
 
 
 // ########################################################## admin #################################################
