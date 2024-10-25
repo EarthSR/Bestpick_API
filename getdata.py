@@ -5,7 +5,7 @@ import mysql.connector  # สำหรับ MySQL
 connection = mysql.connector.connect(
     host='localhost',
     user='root',
-    password='1234',
+    password='123_321',
     database='ReviewAPP'
 )
 
