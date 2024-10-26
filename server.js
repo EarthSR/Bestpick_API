@@ -3261,6 +3261,45 @@ app.delete("/admin/posts/:id", verifyToken, verifyAdmin, (req, res) => {
   });
 });
 
+// API สำหรับแอดมินในการดูโพสต์ที่ถูกรีพอร์ต
+app.get("/admin/reported-posts", verifyToken, (req, res) => {
+  // ตรวจสอบว่า role ของผู้ใช้คือแอดมินหรือไม่
+  if (req.role !== "admin") {
+    return res.status(403).json({ error: "Unauthorized access" });
+  }
+
+  const fetchReportedPostsSql = `
+    SELECT 
+      r.id AS report_id,
+      r.post_id,
+      r.user_id AS reported_by_user_id,
+      r.reason,
+      r.reported_at,
+      p.title AS post_title,
+      p.content AS post_content,
+      u.username AS reported_by_username,
+      u.picture AS reported_by_user_profile,
+      pu.username AS post_owner_username,
+      pu.picture AS post_owner_profile
+    FROM reports r
+    JOIN posts p ON r.post_id = p.id
+    JOIN users u ON r.user_id = u.id
+    JOIN users pu ON p.user_id = pu.id
+    WHERE r.status = 'pending'
+    ORDER BY r.reported_at DESC;
+  `;
+
+  pool.query(fetchReportedPostsSql, (error, results) => {
+    if (error) {
+      console.error("Database error during fetching reported posts:", error);
+      return res.status(500).json({ error: "Error fetching reported posts" });
+    }
+
+    res.json(results);
+  });
+});
+
+
 
 
 // Start the server
