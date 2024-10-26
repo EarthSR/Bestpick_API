@@ -1456,20 +1456,22 @@ app.get("/search", (req, res) => {
 
   // SQL query to search users and posts
   const searchSql = `
-    SELECT 
-      u.id AS user_id,                -- Include user ID
+SELECT 
+      u.id AS user_id,                
       u.username, 
       u.picture,
-      p.id AS post_id,                -- Include post ID
-      LEFT(p.content, 100) AS content_preview,  -- Show the first 100 characters as a preview
-      p.title,                        -- Include post title
-      p.photo_url                     -- Include the photo_url as a string
-    FROM users u
-    LEFT JOIN posts p ON p.user_id = u.id
-    WHERE LOWER(u.username) LIKE ? 
-      OR LOWER(p.content) LIKE ? 
-      OR LOWER(p.title) LIKE ?        -- Add search condition for title
-    ORDER BY p.updated_at DESC
+      p.id AS post_id,                
+      LEFT(p.content, 100) AS content_preview,  
+      p.title,                        
+      p.photo_url                     
+FROM users u
+LEFT JOIN posts p ON p.user_id = u.id
+WHERE (LOWER(u.username) LIKE ? 
+       OR LOWER(p.content) LIKE ? 
+       OR LOWER(p.title) LIKE ?)
+  AND p.status = 'active'        
+ORDER BY p.updated_at DESC;
+
   `;
 
   pool.query(
@@ -1582,6 +1584,7 @@ app.get("/api/users/:userId/profile", verifyToken, (req, res) => {
       (SELECT COUNT(*) FROM comments WHERE post_id = p.id) AS comment_count
     FROM posts p
     WHERE p.user_id = ?
+    AND p.status = 'active'
     ORDER BY p.updated_at DESC;
   `;
 
@@ -1670,6 +1673,7 @@ app.get("/api/users/:userId/view-profile", verifyToken, (req, res) => {
       (SELECT COUNT(*) FROM comments WHERE post_id = p.id) AS comment_count
     FROM posts p
     WHERE p.user_id = ?
+    AND p.status = 'active'
     ORDER BY p.updated_at DESC;
   `;
 
@@ -2108,11 +2112,13 @@ app.get("/api/bookmarks", verifyToken, (req, res) => {
               WHERE follower_id = ? AND following_id = u.id) > 0 
         THEN TRUE ELSE FALSE 
       END AS is_following 
-    FROM bookmarks b
-    JOIN posts p ON b.post_id = p.id
-    JOIN users u ON p.user_id = u.id
-    WHERE b.user_id = ?
-    ORDER BY b.created_at DESC;
+FROM bookmarks b
+JOIN posts p ON b.post_id = p.id
+JOIN users u ON p.user_id = u.id
+WHERE b.user_id = ? 
+  AND p.status = 'active'
+ORDER BY b.created_at DESC;
+
   `;
 
 //แก้3
