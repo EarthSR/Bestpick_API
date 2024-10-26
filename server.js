@@ -3323,6 +3323,43 @@ app.get("/admin/reported-posts", verifyToken, (req, res) => {
   });
 });
 
+app.put("/admin/reports/:reportId", verifyToken, async (req, res) => {
+  const { status } = req.body; // รับสถานะจาก Body
+  const reportId = req.params.reportId; // รับ reportId จากพารามิเตอร์
+
+  // ตรวจสอบว่า role ของผู้ใช้คือแอดมินหรือไม่
+  if (req.role !== "admin") {
+      return res.status(403).json({ error: "Unauthorized access" });
+  }
+
+  // ตรวจสอบว่าสถานะมีค่าหรือไม่
+  if (!status) {
+      return res.status(400).json({ error: "Status is required" });
+  }
+
+  // สร้างคำสั่ง SQL สำหรับการอัปเดตสถานะ
+  const updateReportSql = `
+      UPDATE reports
+      SET status = ?
+      WHERE id = ?;
+  `;
+
+  // ทำการอัปเดตสถานะในฐานข้อมูล
+  pool.query(updateReportSql, [status, reportId], (error, results) => {
+      if (error) {
+          console.error("Database error during updating report:", error);
+          return res.status(500).json({ error: "Error updating report" });
+      }
+      
+      if (results.affectedRows === 0) {
+          return res.status(404).json({ error: "Report not found" });
+      }
+
+      res.json({ message: "Report updated successfully" });
+  });
+});
+
+
 
 
 
