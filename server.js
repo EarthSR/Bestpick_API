@@ -2905,6 +2905,9 @@ const verifyAdmin = (req, res, next) => {
   next();
 };
 
+// Serve images from the uploads directory
+app.use('/uploads', express.static('uploads'));
+
 // Create an Ad (Admin only)
 app.post("/ads", verifyToken, verifyAdmin, upload.single("image"), (req, res) => {
   const { title, content, link, status, expiration_date } = req.body;
@@ -2926,32 +2929,63 @@ app.post("/ads", verifyToken, verifyAdmin, upload.single("image"), (req, res) =>
   });
 });
 
-// Update an Ad (Admin only)
-app.put("/ads/:id", verifyToken, verifyAdmin, upload.single("image"), (req, res) => {
+// สร้าง API สำหรับอัปเดตข้อมูล
+app.put('/ads/:id', upload.single('image'), (req, res) => {
   const { id } = req.params;
-  const { title, content, link, status, expiration_date } = req.body;
+  const { title, content, link, created_at, updated_at } = req.body;
   const image = req.file ? `/uploads/${req.file.filename}` : null;
 
-  // สร้าง SQL สำหรับการอัปเดต
-  const updateAdSql = `
-    UPDATE ads SET title = ?, content = ?, link = ?, image = ?, status = ?, expiration_date = ?
-    WHERE id = ?
-  `;
-  const updateData = [title, content, link, image, status, expiration_date, id];
+  const updateFields = [];
+  const updateValues = [];
 
-  pool.query(updateAdSql, updateData, (err, results) => {
+  if (title) {
+    updateFields.push('title = ?');
+    updateValues.push(title);
+  }
+  if (content) {
+    updateFields.push('content = ?');
+    updateValues.push(content);
+  }
+  if (link) {
+    updateFields.push('link = ?');
+    updateValues.push(link);
+  }
+  if (image) {
+    updateFields.push('image = ?');
+    updateValues.push(image);
+  }
+  if (created_at) {
+    updateFields.push('created_at = ?');
+    updateValues.push(created_at);
+  }
+  if (updated_at) {
+    updateFields.push('updated_at = ?');
+    updateValues.push(updated_at);
+  }
+
+  if (updateFields.length === 0) {
+    return res.status(400).json({ error: 'No fields to update' });
+  }
+
+  const sql = `UPDATE ads SET ${updateFields.join(', ')} WHERE id = ?`;
+  updateValues.push(id);
+
+  pool.query(sql, updateValues, (err, results) => {
     if (err) {
-      console.error("Database error during ad update:", err);
-      return res.status(500).json({ error: "Error updating ad" });
+      console.error('Database error during ad update:', err);
+      return res.status(500).json({ error: 'Error updating ad' });
     }
 
     if (results.affectedRows === 0) {
-      return res.status(404).json({ error: "Ad not found" });
+      return res.status(404).json({ error: 'Ad not found' });
     }
 
-    res.json({ message: "Ad updated successfully" });
+    res.json({ message: 'Ad updated successfully' });
   });
 });
+
+
+
 
 // Delete an Ad (Admin only)
 app.delete("/ads/:id", verifyToken, verifyAdmin, (req, res) => {
@@ -3005,6 +3039,63 @@ app.get("/ads/:id", (req, res) => {
   });
 });
 
+// Serve Ad Image by ID
+app.get("/ads/:id/image", (req, res) => {
+  const { id } = req.params;
+
+  const fetchAdImageSql = `SELECT image FROM ads WHERE id = ?`;
+  pool.query(fetchAdImageSql, [id], (err, results) => {
+    if (err) {
+      console.error("Database error during fetching ad image:", err);
+      return res.status(500).json({ error: "Error fetching ad image" });
+    }
+
+    if (results.length === 0) {
+      return res.status(404).json({ error: "Ad not found" });
+    }
+
+    const imagePath = results[0].image;
+    if (imagePath) {
+      res.json({ imageUrl: `${req.protocol}://${req.get('host')}${imagePath}` });
+    } else {
+      res.status(404).json({ error: "Image not found" });
+    }
+  });
+});
+
+
+// ดึงข้อมูลผู้ใช้ทั้งหมด
+app.get("/admin/users", (req, res) => {
+  const fetchUsersSql = "SELECT * FROM users"; // คำสั่ง SQL สำหรับดึงข้อมูลผู้ใช้
+
+  pool.query(fetchUsersSql, (err, results) => {
+    if (err) {
+      console.error("Database error during fetching users:", err);
+      return res.status(500).json({ error: "Error fetching users" });
+    }
+
+    res.json(results); // ส่งผลลัพธ์ที่ดึงได้กลับไป
+  });
+});
+
+// ดึงข้อมูลผู้ใช้โดย ID
+app.get("/admin/users/:id", (req, res) => {
+  const { id } = req.params;
+  
+  const fetchUserSql = "SELECT * FROM users WHERE id = ?";
+  pool.query(fetchUserSql, [id], (err, results) => {
+    if (err) {
+      console.error("Database error during fetching user:", err);
+      return res.status(500).json({ error: "Error fetching user" });
+    }
+
+    if (results.length === 0) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    res.json(results[0]); // ส่งข้อมูลผู้ใช้ที่ถูกดึงได้กลับไป
+  });
+});
 
 // Edit user status by admin
 app.put("/admin/users/:id/status", verifyToken, verifyAdmin, (req, res) => {
@@ -3079,6 +3170,37 @@ app.delete("/admin/users/:id", verifyToken, (req, res) => {
   });
 });
 
+// Get all posts
+app.get("/admin/posts", verifyToken, verifyAdmin, (req, res) => {
+  const fetchPostsSql = "SELECT * FROM posts"; // ดึงข้อมูลโพสต์ทั้งหมด
+  pool.query(fetchPostsSql, (err, results) => {
+    if (err) {
+      console.error("Database error during fetching posts:", err);
+      return res.status(500).json({ error: "Error fetching posts" });
+    }
+
+    res.json(results);
+  });
+});
+
+// Get post by ID
+app.get("/admin/posts/:id", verifyToken, verifyAdmin, (req, res) => {
+  const { id } = req.params;
+
+  const fetchPostSql = "SELECT * FROM posts WHERE id = ?";
+  pool.query(fetchPostSql, [id], (err, results) => {
+    if (err) {
+      console.error("Database error during fetching post:", err);
+      return res.status(500).json({ error: "Error fetching post" });
+    }
+
+    if (results.length === 0) {
+      return res.status(404).json({ error: "Post not found" });
+    }
+
+    res.json(results[0]);
+  });
+});
 
 
 // Update post status by admin
