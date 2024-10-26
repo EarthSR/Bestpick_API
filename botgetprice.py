@@ -266,6 +266,7 @@ def verify_token(f):
 
     return decorated_function
 
+#แก้6
 
 # Example of using the token verification in a route
 @app.route('/recommend', methods=['POST'])
