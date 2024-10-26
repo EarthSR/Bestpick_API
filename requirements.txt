@@ -1,0 +1,10 @@
+Flask
+selenium
+bs4
+requests
+joblib
+pandas
+SQLAlchemy
+python-dotenv
+Flask-SQLAlchemy
+PyJWT

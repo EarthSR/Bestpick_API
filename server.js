@@ -1032,6 +1032,7 @@ app.put("/posts/:id/status", verifyToken, (req, res) => {
   });
 });
 
+//1 แก้
 
 // View a Single Post with Like and Comment Count and Show Comments
 app.get("/posts/:id", verifyToken, (req, res) => {
@@ -1444,6 +1445,8 @@ app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 app.get("/search", (req, res) => {
   const { query } = req.query;
 
+//แก้5
+
   if (!query) {
     return res.status(400).json({ error: "Search query is required" });
   }
@@ -1453,20 +1456,22 @@ app.get("/search", (req, res) => {
 
   // SQL query to search users and posts
   const searchSql = `
-    SELECT 
-      u.id AS user_id,                -- Include user ID
+SELECT 
+      u.id AS user_id,                
       u.username, 
       u.picture,
-      p.id AS post_id,                -- Include post ID
-      LEFT(p.content, 100) AS content_preview,  -- Show the first 100 characters as a preview
-      p.title,                        -- Include post title
-      p.photo_url                     -- Include the photo_url as a string
-    FROM users u
-    LEFT JOIN posts p ON p.user_id = u.id
-    WHERE LOWER(u.username) LIKE ? 
-      OR LOWER(p.content) LIKE ? 
-      OR LOWER(p.title) LIKE ?        -- Add search condition for title
-    ORDER BY p.updated_at DESC
+      p.id AS post_id,                
+      LEFT(p.content, 100) AS content_preview,  
+      p.title,                        
+      p.photo_url                     
+FROM users u
+LEFT JOIN posts p ON p.user_id = u.id
+WHERE (LOWER(u.username) LIKE ? 
+       OR LOWER(p.content) LIKE ? 
+       OR LOWER(p.title) LIKE ?)
+  AND p.status = 'active'        
+ORDER BY p.updated_at DESC;
+
   `;
 
   pool.query(
@@ -1579,6 +1584,7 @@ app.get("/api/users/:userId/profile", verifyToken, (req, res) => {
       (SELECT COUNT(*) FROM comments WHERE post_id = p.id) AS comment_count
     FROM posts p
     WHERE p.user_id = ?
+    AND p.status = 'active'
     ORDER BY p.updated_at DESC;
   `;
 
@@ -1653,6 +1659,8 @@ app.get("/api/users/:userId/view-profile", verifyToken, (req, res) => {
     GROUP BY u.id;
   `;
 
+//แก้ 2 
+
   const postSql = `
     SELECT 
       p.id AS post_id,
@@ -1665,6 +1673,7 @@ app.get("/api/users/:userId/view-profile", verifyToken, (req, res) => {
       (SELECT COUNT(*) FROM comments WHERE post_id = p.id) AS comment_count
     FROM posts p
     WHERE p.user_id = ?
+    AND p.status = 'active'
     ORDER BY p.updated_at DESC;
   `;
 
@@ -2103,12 +2112,16 @@ app.get("/api/bookmarks", verifyToken, (req, res) => {
               WHERE follower_id = ? AND following_id = u.id) > 0 
         THEN TRUE ELSE FALSE 
       END AS is_following 
-    FROM bookmarks b
-    JOIN posts p ON b.post_id = p.id
-    JOIN users u ON p.user_id = u.id
-    WHERE b.user_id = ?
-    ORDER BY b.created_at DESC;
+FROM bookmarks b
+JOIN posts p ON b.post_id = p.id
+JOIN users u ON p.user_id = u.id
+WHERE b.user_id = ? 
+  AND p.status = 'active'
+ORDER BY b.created_at DESC;
+
   `;
+
+//แก้3
 
   pool.query(fetchBookmarksSql, [user_id, user_id], (err, results) => {
     if (err) {
@@ -2450,6 +2463,8 @@ app.get("/posts/:postId/bookmark/status", verifyToken, (req, res) => {
 // API to get posts from followed users
 app.get("/api/following/posts", verifyToken, (req, res) => {
   const userId = req.userId; // The logged-in user who is following others
+
+//แก้4
 
   const getFollowedPostsSql = `
     SELECT 
@@ -3269,6 +3284,45 @@ app.delete("/admin/posts/:id", verifyToken, verifyAdmin, (req, res) => {
     res.json({ message: "Post deleted successfully" });
   });
 });
+
+// API สำหรับแอดมินในการดูโพสต์ที่ถูกรีพอร์ต
+app.get("/admin/reported-posts", verifyToken, (req, res) => {
+  // ตรวจสอบว่า role ของผู้ใช้คือแอดมินหรือไม่
+  if (req.role !== "admin") {
+    return res.status(403).json({ error: "Unauthorized access" });
+  }
+
+  const fetchReportedPostsSql = `
+    SELECT 
+      r.id AS report_id,
+      r.post_id,
+      r.user_id AS reported_by_user_id,
+      r.reason,
+      r.reported_at,
+      p.title AS post_title,
+      p.content AS post_content,
+      u.username AS reported_by_username,
+      u.picture AS reported_by_user_profile,
+      pu.username AS post_owner_username,
+      pu.picture AS post_owner_profile
+    FROM reports r
+    JOIN posts p ON r.post_id = p.id
+    JOIN users u ON r.user_id = u.id
+    JOIN users pu ON p.user_id = pu.id
+    WHERE r.status = 'pending'
+    ORDER BY r.reported_at DESC;
+  `;
+
+  pool.query(fetchReportedPostsSql, (error, results) => {
+    if (error) {
+      console.error("Database error during fetching reported posts:", error);
+      return res.status(500).json({ error: "Error fetching reported posts" });
+    }
+
+    res.json(results);
+  });
+});
+
 
 
 
