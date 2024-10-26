@@ -32,7 +32,7 @@ chrome_options.add_argument("--no-sandbox")
 chrome_options.add_argument("--disable-dev-shm-usage")
 chrome_options.add_argument("--window-size=1920x1080")
 chrome_options.add_argument("--log-level=3")
-chrome_driver_path = os.getenv('CHROME_DRIVER_PATH', "C:/chromedriver/chromedriver.exe")
+chrome_driver_path = os.path.join(os.getcwd(), "chromedriver", "chromedriver.exe")
 chrome_service = Service(chrome_driver_path)
 driver = webdriver.Chrome(service=chrome_service, options=chrome_options)
 

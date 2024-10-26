@@ -53,30 +53,45 @@ def hybrid_recommendations(user_id, post_id, alpha=0.85):
     final_score = alpha * collab_pred + (1 - alpha) * content_pred
     return {"post_id": post_id, "final_score": final_score}
 
-# ฟังก์ชันสำหรับแนะนำโพสต์ให้ผู้ใช้ โดยเรียงลำดับโพสต์ตามคะแนนจากมากไปน้อย
 def recommend_posts_for_user(user_id, alpha=0.7):
     data = load_data_from_db()  # โหลดข้อมูลใหม่ทุกครั้ง
+
+    # ลบโพสต์ที่มี post_id ซ้ำใน DataFrame
+    data = data.drop_duplicates(subset='post_id')
+
     post_scores = []
-    
-    # ตรวจสอบข้อมูลใน DataFrame
-    print("DataFrame Preview:")
-    print(data[['post_id', 'post_content', 'category_name']].head(10))
-    
-    # ตรวจสอบขนาดของ TF-IDF Matrix
-    print("TF-IDF Matrix Shape:", tfidf_matrix.shape)
-    
-    # ตรวจสอบค่า Cosine Similarity
-    print("Cosine Similarity Sample:", cosine_sim[:5, :5])  # ดูค่าบางส่วน
-    
+
+    # วันที่ปัจจุบัน
+    current_date = pd.to_datetime("now")
+
     # วนผ่านโพสต์ทั้งหมดเพื่อคำนวณคะแนนการแนะนำ
     for post_id in data['post_id'].unique():
         score = hybrid_recommendations(user_id, post_id, alpha=alpha)
-        post_scores.append((int(score['post_id']), float(score['final_score'])))  # แปลงเป็น int และ float เพื่อความปลอดภัยในการ serialize
-    
-    # เรียงลำดับโพสต์ตามคะแนนจากมากไปน้อย
-    post_scores = sorted(post_scores, key=lambda x: x[1], reverse=True)
-    
-    return post_scores
+        final_score = float(score['final_score'])
 
-recommend_posts = recommend_posts_for_user(user_id=780010)
+        # เพิ่มคะแนนสำหรับโพสต์ใหม่ (ถ้ามีคอลัมน์ updated_at)
+        post_date = pd.to_datetime(data.loc[data['post_id'] == post_id, 'updated_at'].values[0])
+        age_in_days = (current_date - post_date).days
+
+        # สมมุติว่าเพิ่ม 2 คะแนนสำหรับโพสต์ที่สร้างใน 7 วันที่ผ่านมา
+        if age_in_days <= 7:
+            final_score += 1.0  # เพิ่มคะแนนให้กับโพสต์ใหม่
+
+        post_scores.append((int(score['post_id']), final_score))  # แปลงเป็น int และ float เพื่อความปลอดภัยในการ serialize
+
+
+    # เรียงลำดับโพสต์ตามคะแนนจากมากไปน้อย
+    post_scores = sorted(post_scores, key=lambda x: x[1], reverse=True)  # เรียงตามคะแนน
+
+
+    # สุ่มเลือก 3 โพสต์แรกที่มีคะแนนสูงสุด
+    top_posts = post_scores[:3]  # 3 โพสต์แรกที่มีคะแนนสูงสุด
+    remaining_posts = post_scores[3:]  # โพสต์ที่เหลือ
+
+    # แสดงผลโพสต์ที่แนะนำ
+    recommended_posts = top_posts + remaining_posts  # รวมผลลัพธ์
+
+    return recommended_posts
+
+recommend_posts = recommend_posts_for_user(user_id=1200003)
 print(recommend_posts)

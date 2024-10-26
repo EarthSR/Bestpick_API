@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  app:
+    image: node:14  # เปลี่ยนเป็น image ที่มี Node.js
+    container_name: bestpick_api
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+    volumes:
+      - .:/app
+    working_dir: /app
+    command: "sh -c 'node server.js & python botgetprice.py'"
+
+  nginx:
+    image: nginx
+    container_name: mynginx
+    ports:
+      - "8080:80"
+    networks:
+      - mynetwork
+
+  mysql:
+    image: mysql
+    container_name: mymysql
+    environment:
+      MYSQL_ROOT_PASSWORD: 1234
+    ports:
+      - "3307:3306"
+    networks:
+      - mynetwork
+
+networks:
+  mynetwork:
+    driver: bridge
