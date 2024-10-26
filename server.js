@@ -1032,6 +1032,7 @@ app.put("/posts/:id/status", verifyToken, (req, res) => {
   });
 });
 
+//1 แก้
 
 // View a Single Post with Like and Comment Count and Show Comments
 app.get("/posts/:id", verifyToken, (req, res) => {
@@ -1444,6 +1445,8 @@ app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 app.get("/search", (req, res) => {
   const { query } = req.query;
 
+//แก้5
+
   if (!query) {
     return res.status(400).json({ error: "Search query is required" });
   }
@@ -1652,6 +1655,8 @@ app.get("/api/users/:userId/view-profile", verifyToken, (req, res) => {
     WHERE u.id = ?
     GROUP BY u.id;
   `;
+
+//แก้ 2 
 
   const postSql = `
     SELECT 
@@ -2110,6 +2115,8 @@ app.get("/api/bookmarks", verifyToken, (req, res) => {
     ORDER BY b.created_at DESC;
   `;
 
+//แก้3
+
   pool.query(fetchBookmarksSql, [user_id, user_id], (err, results) => {
     if (err) {
       console.error("Database error during fetching bookmarks:", err);
@@ -2450,6 +2457,8 @@ app.get("/posts/:postId/bookmark/status", verifyToken, (req, res) => {
 // API to get posts from followed users
 app.get("/api/following/posts", verifyToken, (req, res) => {
   const userId = req.userId; // The logged-in user who is following others
+
+//แก้4
 
   const getFollowedPostsSql = `
     SELECT 

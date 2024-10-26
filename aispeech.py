@@ -1,46 +1,50 @@
-from transformers import TFBertForSequenceClassification, BertTokenizer
-from tensorflow.keras.optimizers import Adam
-from sklearn.model_selection import train_test_split
-import pandas as pd
-import tensorflow as tf
+from flask import Flask, request, jsonify
+import pickle
+import re
 
-# โหลดโมเดลและ tokenizer
-model_name = "bert-base-multilingual-cased"
-tokenizer = BertTokenizer.from_pretrained(model_name)
-bert_model = TFBertForSequenceClassification.from_pretrained(model_name, num_labels=4)
+app = Flask(__name__)
 
-# การเตรียมข้อมูล
-def encode_data(texts, tokenizer, max_len=128):
-    return tokenizer(
-        texts.tolist(),
-        padding=True,
-        truncation=True,
-        max_length=max_len,
-        return_tensors='tf'
-    )
+# โหลดโมเดลและ vectorizer จากไฟล์ .pkl
+MODEL_PATH = 'thai_profanity_model.pkl'
+with open(MODEL_PATH, 'rb') as model_file:
+    model, vectorizer = pickle.load(model_file)
 
-data = pd.read_csv("thai_balanced_toxic_comments.csv")
-texts = data['Text'].values
-labels = data['Label'].values
+# ฟังก์ชันสำหรับเซ็นเซอร์คำหยาบในประโยค
+def censor_profanity(sentence):
+    words = sentence.split()
+    contains_profanity = False
 
-# แบ่งข้อมูลเป็นชุดฝึกและทดสอบ
-X_train, X_test, y_train, y_test = train_test_split(texts, labels, test_size=0.2, random_state=42)
+    # ตรวจสอบคำหยาบ
+    for word in words:
+        # แปลงคำเป็นเวกเตอร์ด้วย vectorizer
+        word_vector = vectorizer.transform([word])
 
-# เข้ารหัสข้อความ
-train_encodings = encode_data(X_train, tokenizer)
-test_encodings = encode_data(X_test, tokenizer)
+        # ทำนายว่าคำเป็นคำหยาบหรือไม่
+        prediction = model.predict(word_vector)
+        
+        # หากมีคำหยาบ (ระดับ 1 หรือ 2) ให้เปลี่ยนค่า contains_profanity และหยุดการตรวจสอบเพิ่มเติม
+        if prediction[0] in [1, 2]:
+            contains_profanity = True
+            break
 
-# การฝึกโมเดล BERT
-bert_model.compile(optimizer=tf.optimizers.Adam(learning_rate=3e-5), loss='sparse_categorical_crossentropy', metrics=['accuracy'])
+    # หากมีคำหยาบในประโยค เซ็นเซอร์ทั้งประโยค
+    if contains_profanity:
+        return '*' * len(sentence)  # เซ็นเซอร์ทั้งประโยคด้วย *
+    else:
+        return sentence  # คืนค่าเดิมถ้าไม่มีคำหยาบ
 
-bert_model.fit(
-    [train_encodings['input_ids'], train_encodings['attention_mask']],
-    y_train,
-    epochs=3,
-    batch_size=16,
-    validation_data=([test_encodings['input_ids'], test_encodings['attention_mask']], y_test)
-)
+# สร้าง API สำหรับการเซ็นเซอร์คำหยาบ
+@app.route('/censor', methods=['POST'])
+def censor():
+    data = request.get_json()
+    sentence = data.get('sentence', '')
 
-# การประเมินผลโมเดล
-loss, accuracy = bert_model.evaluate([test_encodings['input_ids'], test_encodings['attention_mask']], y_test)
-print(f'Test Accuracy: {accuracy}')
+    # เซ็นเซอร์คำหยาบในประโยค
+    censored_sentence = censor_profanity(sentence)
+    return jsonify({
+        'original': sentence,
+        'censored': censored_sentence
+    })
+
+if __name__ == '__main__':
+    app.run(debug=True)
