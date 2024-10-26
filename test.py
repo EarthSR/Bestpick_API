@@ -1,19 +1,18 @@
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
+import os
 
-# เรียกใช้ ChromeDriver
-chrome_service = Service(ChromeDriverManager().install())
-chrome_options = webdriver.ChromeOptions()
+# กำหนด path ของ chromedriver.exe ภายในโฟลเดอร์ chromedriver
+chrome_driver_path = os.path.join(os.getcwd(), "chromedriver", "chromedriver.exe")
 
-# เปิดใช้งาน WebDriver
-driver = webdriver.Chrome(service=chrome_service, options=chrome_options)
+# สร้าง Service object สำหรับ Chrome Driver
+service = Service(executable_path=chrome_driver_path)
 
-# เปิดหน้าเว็บ Google
+# สร้าง instance ของ Chrome Driver โดยใช้ Service object
+driver = webdriver.Chrome(service=service)
+
+# ทำสิ่งที่ต้องการ เช่น เปิดเว็บไซต์
 driver.get("https://www.google.com")
 
-# พิมพ์ title ของหน้าเว็บเพื่อเช็คว่าการเปิดทำงานได้ถูกต้อง
-print(driver.title)
-
-# ปิดเบราว์เซอร์
+# ปิด browser หลังการใช้งาน
 driver.quit()
