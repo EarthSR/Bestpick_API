@@ -13,8 +13,6 @@ connection = mysql.connector.connect(
 query = "SELECT * FROM clean_new_view;"
 df = pd.read_sql(query, connection)
 
-
-
 # ส่งออกข้อมูลเป็น CSV
 df.to_csv('clean_new_view.csv', index=False)
 
