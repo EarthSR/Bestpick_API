@@ -33,7 +33,8 @@ chrome_options.add_argument("--disable-dev-shm-usage")
 chrome_options.add_argument("--window-size=1920x1080")
 chrome_options.add_argument("--log-level=3")
 chrome_driver_path = os.path.join(os.getcwd(), "chromedriver", "chromedriver.exe")
-chrome_service = Service(chrome_driver_path)
+# chrome_service = Service(chrome_driver_path)
+chrome_service = Service('/usr/bin/chromedriver')
 driver = webdriver.Chrome(service=chrome_service, options=chrome_options)
 
 # Filter products by name to match search term
