@@ -3301,6 +3301,7 @@ app.get("/admin/reported-posts", verifyToken, (req, res) => {
       r.reported_at,
       p.title AS post_title,
       p.content AS post_content,
+      r.status,
       u.username AS reported_by_username,
       u.picture AS reported_by_user_profile,
       pu.username AS post_owner_username,

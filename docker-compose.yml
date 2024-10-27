@@ -1,23 +1,33 @@
-version: '3.8'
-
 services:
-  app:
-    image: node:14
+  api:
+    build:
+      context: .  # Dockerfile ของ API อยู่ในโฟลเดอร์ API
+      dockerfile: Dockerfile
     container_name: bestpick_api
     ports:
-      - "3000:3000"
+      - "3001:3000"  # แมปพอร์ต 3001 บนโฮสต์ไปยังพอร์ต 3000 ของ API
     environment:
       - NODE_ENV=production
-      - DB_HOST=mymysql
+      - DB_HOST=mysql  # เชื่อมต่อกับ MySQL container
       - DB_USER=root
       - DB_PASSWORD=1234
       - DB_NAME=ReviewAPP
     volumes:
-      - .:/app
+      - .:/app:rw 
     working_dir: /app
-    command: "sh -c 'node server.js & python3 botgetprice.py'"
+    command: "sh -c 'node server.js & python3 botgetprice.py'"  # รัน server.js และ botgetprice.py พร้อมกัน
     depends_on:
       - mysql
+    networks:
+      - mynetwork
+
+  react:
+    build:
+      context: ../../admin_Bestpick  # Dockerfile ของ React อยู่ในโฟลเดอร์ admin_Bestpick
+      dockerfile: Dockerfile
+    container_name: react_app
+    ports:
+      - "3000:80"  # แมปพอร์ต 3000 บนโฮสต์ไปยังพอร์ต 80 ของ React
     networks:
       - mynetwork
 
@@ -25,9 +35,12 @@ services:
     image: nginx
     container_name: mynginx
     ports:
-      - "8080:80"
+      - "8080:80"  # แมปพอร์ต 8080 บนโฮสต์ไปยังพอร์ต 80 ของ Nginx
     networks:
       - mynetwork
+    depends_on:
+      - react
+      - api
 
   mysql:
     image: mysql
@@ -36,7 +49,7 @@ services:
       MYSQL_ROOT_PASSWORD: 1234
       MYSQL_DATABASE: ReviewAPP
     ports:
-      - "3307:3306"
+      - "3307:3306"  # แมปพอร์ต 3307 บนโฮสต์ไปยังพอร์ต 3306 ของ MySQL
     networks:
       - mynetwork
 
