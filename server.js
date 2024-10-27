@@ -1037,7 +1037,7 @@ app.put("/api/posts/:id/status", verifyToken, (req, res) => {
 //1 แก้
 
 // View a Single Post with Like and Comment Count and Show Comments
-app.get("/posts/:id", verifyToken, (req, res) => {
+app.get("/api/posts/:id", verifyToken, (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.userId;
@@ -1442,6 +1442,8 @@ app.post("/api/posts/like/:id", verifyToken, (req, res) => {
 
 // Serve static files (uploaded images and videos)
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+
+//แก้5 ยังไม่ได้เช็ค
 
 // Search API with grouped results by username, and include only the first photo_url
 app.get("/api/search", (req, res) => {
