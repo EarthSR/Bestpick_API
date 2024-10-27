@@ -4,7 +4,7 @@ Flask
 Selenium
 beautifulsoup4
 requests
-joblib
+joblib>=1.3.0
 SQLAlchemy
 python-dotenv
 Flask-SQLAlchemy

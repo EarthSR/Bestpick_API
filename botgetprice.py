@@ -1,7 +1,7 @@
 from flask import Flask, request, jsonify
 from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.firefox.service import Service
+from selenium.webdriver.firefox.options import Options
 from bs4 import BeautifulSoup
 import requests
 import time
@@ -24,18 +24,18 @@ import random
 
 app = Flask(__name__)
 
-# Set up Selenium driver
-chrome_options = Options()
-chrome_options.add_argument("--headless")
-chrome_options.add_argument("--disable-gpu")
-chrome_options.add_argument("--no-sandbox")
-chrome_options.add_argument("--disable-dev-shm-usage")
-chrome_options.add_argument("--window-size=1920x1080")
-chrome_options.add_argument("--log-level=3")
-chrome_driver_path = os.path.join(os.getcwd(), "chromedriver", "chromedriver.exe")
-# chrome_service = Service(chrome_driver_path)
-chrome_service = Service('/usr/bin/chromedriver')
-driver = webdriver.Chrome(service=chrome_service, options=chrome_options)
+# สร้าง Firefox options
+firefox_options = Options()
+firefox_options.add_argument("--headless")
+firefox_options.add_argument("--disable-gpu")
+firefox_options.add_argument("--no-sandbox")
+firefox_options.binary_location = "/usr/bin/firefox"  # กำหนดเส้นทาง Firefox
+
+# ตั้งค่าเส้นทางของ GeckoDriver บน Linux (Docker)
+firefox_service = Service('/usr/local/bin/geckodriver')
+
+# สร้าง FirefoxDriver ด้วย service และ options
+driver = webdriver.Firefox(service=firefox_service, options=firefox_options)
 
 # Filter products by name to match search term
 def filter_products_by_name(products, search_name):
