@@ -20,20 +20,26 @@ import jwt
 from functools import wraps
 from dotenv import load_dotenv
 import random
+import sys
+import pickle
+from pythainlp import word_tokenize
+
 
 
 app = Flask(__name__)
 
-# Set up Selenium driver
+# สร้าง Chrome options
 chrome_options = Options()
-chrome_options.add_argument("--headless")
-chrome_options.add_argument("--disable-gpu")
-chrome_options.add_argument("--no-sandbox")
-chrome_options.add_argument("--disable-dev-shm-usage")
-chrome_options.add_argument("--window-size=1920x1080")
-chrome_options.add_argument("--log-level=3")
+chrome_options.add_argument("--headless")  # รันแบบไม่มี UI
+chrome_options.add_argument("--disable-gpu")  # ปิดการใช้ GPU (สำหรับ Linux)
+chrome_options.add_argument("--no-sandbox")  # ปิด sandbox (จำเป็นใน Docker)
+chrome_options.add_argument("--disable-dev-shm-usage")  # ลดการใช้ shared memory (แก้ไขปัญหาใน Docker)
+chrome_options.add_argument("--window-size=1920x1080")  # ตั้งขนาดหน้าต่าง
+chrome_options.add_argument("--log-level=3")  # ลดการแสดง log
 chrome_driver_path = os.path.join(os.getcwd(), "chromedriver", "chromedriver.exe")
 chrome_service = Service(chrome_driver_path)
+
+# สร้าง ChromeDriver ด้วย service และ options
 driver = webdriver.Chrome(service=chrome_service, options=chrome_options)
 
 # Filter products by name to match search term
@@ -280,55 +286,132 @@ def verify_token(f):
 
     return decorated_function
 
+sys.stdout.reconfigure(encoding='utf-8')
+
+# โหลดโมเดลและ vectorizer จากไฟล์ .pkl
+with open('thai_profanity_model.pkl', 'rb') as model_file:
+    model, vectorizer = pickle.load(model_file)
+
+# ฟังก์ชันสำหรับการเซ็นเซอร์คำหยาบในประโยค
+def censor_profanity(sentence):
+    """
+    ฟังก์ชันนี้รับประโยค (sentence) เป็น input 
+    และจะเซ็นเซอร์คำที่เป็นคำหยาบโดยแทนที่ด้วยเครื่องหมาย '*'
+    สำหรับคำที่ไม่หยาบจะคงค่าเดิมไว้
+    """
+    words = word_tokenize(sentence, engine="newmm")
+    censored_words = []
+
+    for word in words:
+        try:
+            word_vectorized = vectorizer.transform([word])
+        except Exception:
+            censored_words.append(word)
+            continue
+
+        if word_vectorized.nnz == 0:
+            censored_words.append(word)
+            continue
+
+        prediction = model.predict(word_vectorized)
+
+        if prediction[0] == 1:
+            censored_words.append('*' * len(word))
+            print(f"Censored: {word} -> {'*' * len(word)}")  # เพิ่มการพิมพ์คำหยาบที่ถูกเซ็นเซอร์
+        else:
+            censored_words.append(word)
+
+    return ''.join(censored_words)
+
+
+# ฟังก์ชันดึงข้อมูลจากฐานข้อมูลและเซ็นเซอร์
+def fetch_and_censor_from_db():
+
+    engine = create_engine('mysql+mysqlconnector://root:1234@localhost/ReviewAPP')
+
+    # ดึงข้อมูลจากฐานข้อมูล (ปรับ query ตามที่ต้องการ)
+    query = "SELECT id, Title, content FROM posts WHERE status='active';"
+    posts = pd.read_sql(query, con=engine)
+
+    # เซ็นเซอร์ title และ content ของแต่ละโพสต์
+    posts['censored_title'] = posts['Title'].apply(censor_profanity)
+    posts['censored_content'] = posts['content'].apply(censor_profanity)
+
+    # แสดงผลลัพธ์ที่เซ็นเซอร์แล้ว
+    for _, row in posts.iterrows():
+        print(f"Post ID: {row['id']}")
+        print(f"Censored Title: {row['censored_title']}")
+        print(f"Censored Content: {row['censored_content']}")
+        print("-" * 30)
+
+# เรียกใช้ฟังก์ชันโดยตรง
+if __name__ == "__main__":
+    fetch_and_censor_from_db()
+
 #แก้6
 
 @app.route('/recommend', methods=['POST'])
 @verify_token
 def recommend():
-    user_id = request.user_id
-    post_scores = recommend_posts_for_user(user_id)
+    try:
+        user_id = request.user_id
+        post_scores = recommend_posts_for_user(user_id)
 
-    if not post_scores:
-        return jsonify({"error": "No recommendations found"}), 404
+        if not post_scores:
+            return jsonify({"error": "No recommendations found"}), 404
 
-    # เตรียม post_ids จาก post_scores
-    post_ids = [post_id for post_id, _ in post_scores]
+        # เตรียม post_ids จาก post_scores
+        post_ids = [post_id for post_id, _ in post_scores]
 
-    # ตรวจสอบว่า post_ids ถูกต้อง
-    print("Post IDs for database query:", post_ids)
+        # ตรวจสอบว่า post_ids ถูกต้อง
+        print("Post IDs for database query:", post_ids)
 
-    placeholders = ', '.join([f':id_{i}' for i in range(len(post_ids))])
-    query = text(f"""
-        SELECT posts.*, users.username, users.picture, 
-               (SELECT COUNT(*) FROM likes WHERE post_id = posts.id AND user_id = :user_id) AS is_liked
-        FROM posts 
-        JOIN users ON posts.user_id = users.id
-        WHERE posts.status = 'active' AND posts.id IN ({placeholders})
-    """)
+        placeholders = ', '.join([f':id_{i}' for i in range(len(post_ids))])
+        query = text(f"""
+            SELECT posts.*, users.username, users.picture, 
+                   (SELECT COUNT(*) FROM likes WHERE post_id = posts.id AND user_id = :user_id) AS is_liked
+            FROM posts 
+            JOIN users ON posts.user_id = users.id
+            WHERE posts.status = 'active' AND posts.id IN ({placeholders})
+        """)
 
-    params = {'user_id': user_id, **{f'id_{i}': post_id for i, post_id in enumerate(post_ids)}}
-    result = db.session.execute(query, params).fetchall()
-    posts = [row._mapping for row in result]
+        params = {'user_id': user_id, **{f'id_{i}': post_id for i, post_id in enumerate(post_ids)}}
+        result = db.session.execute(query, params).fetchall()
+        posts = [row._mapping for row in result]
 
-    # ใช้ post_scores เพื่อจัดเรียงโพสต์ตามคะแนน
-    sorted_posts = sorted(posts, key=lambda x: post_scores[post_ids.index(x['id'])][1], reverse=True)
+        # ใช้ post_scores เพื่อจัดเรียงโพสต์ตามคะแนน
+        sorted_posts = sorted(posts, key=lambda x: post_scores[post_ids.index(x['id'])][1], reverse=True)
 
-    recommendations = [
-        {
-            "id": post['id'],
-            "userId": post['user_id'],
-            "title": post['Title'],
-            "content": post['content'],
-            "updated": post['updated_at'].astimezone(timezone.utc).replace(microsecond=0).isoformat() + 'Z',
-            "photo_url": json.loads(post.get('photo_url', '[]')),
-            "video_url": json.loads(post.get('video_url', '[]')),
-            "userName": post['username'],
-            "userProfileUrl": post['picture'],
-            "is_liked": post['is_liked'] > 0
-        } for post in sorted_posts
-    ]
+        recommendations = []
+        for post in sorted_posts:
+            # เซ็นเซอร์คำหยาบใน title และ content
+            censored_title = censor_profanity(post['Title'])
+            censored_content = censor_profanity(post['content'])
 
-    return jsonify(recommendations)
+            # สร้างรายการแนะนำโพสต์
+            recommendations.append({
+                "id": post['id'],
+                "userId": post['user_id'],
+                "title": censored_title,
+                "content": censored_content,
+                "updated": post['updated_at'].astimezone(timezone.utc).replace(microsecond=0).isoformat() + 'Z',
+                "photo_url": json.loads(post.get('photo_url', '[]')),
+                "video_url": json.loads(post.get('video_url', '[]')),
+                "userName": post['username'],
+                "userProfileUrl": post['picture'],
+                "is_liked": post['is_liked'] > 0
+            })
+
+        return jsonify(recommendations)
+
+    except Exception as e:
+        # พิมพ์ข้อความ error ใน Console เพื่อให้คุณเห็นรายละเอียด
+        print("Error in recommend function:", e)
+        # ส่งข้อความ error กลับไปในรูปแบบ JSON
+        return jsonify({"error": "Internal Server Error"}), 500
+
+
+
 
 
 
