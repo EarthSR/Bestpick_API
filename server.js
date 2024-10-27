@@ -2961,7 +2961,7 @@ app.post("/ads", verifyToken, verifyAdmin, upload.single("image"), (req, res) =>
 // สร้าง API สำหรับอัปเดตข้อมูล
 app.put('/ads/:id', upload.single('image'), (req, res) => {
   const { id } = req.params;
-  const { title, content, link, created_at, updated_at } = req.body;
+  const { title, content, link, created_at, updated_at, status, expiration_date } = req.body;
   const image = req.file ? `/uploads/${req.file.filename}` : null;
 
   const updateFields = [];
@@ -2983,6 +2983,10 @@ app.put('/ads/:id', upload.single('image'), (req, res) => {
     updateFields.push('image = ?');
     updateValues.push(image);
   }
+  if (status) {
+    updateFields.push('status = ?'); // แก้ไขการเพิ่มสถานะ
+    updateValues.push(status); // แทรกค่า status
+  }
   if (created_at) {
     updateFields.push('created_at = ?');
     updateValues.push(created_at);
@@ -2990,6 +2994,10 @@ app.put('/ads/:id', upload.single('image'), (req, res) => {
   if (updated_at) {
     updateFields.push('updated_at = ?');
     updateValues.push(updated_at);
+  }
+  if (expiration_date) {
+    updateFields.push('expiration_date = ?'); // เพิ่มการจัดการ expiration_date
+    updateValues.push(expiration_date); // แทรกค่า expiration_date
   }
 
   if (updateFields.length === 0) {
@@ -3012,6 +3020,7 @@ app.put('/ads/:id', upload.single('image'), (req, res) => {
     res.json({ message: 'Ad updated successfully' });
   });
 });
+
 
 
 
@@ -3233,29 +3242,29 @@ app.get("/admin/posts/:id", verifyToken, verifyAdmin, (req, res) => {
 
 
 // Update post status by admin
-app.put("/admin/posts/:id/status", verifyToken, verifyAdmin, (req, res) => {
+app.put("/admin/posts/:id", verifyToken, verifyAdmin, (req, res) => {
   const { id } = req.params;
-  const { status } = req.body;
+  const { title, content, status, ProductName } = req.body;
 
-  // Validate that the status field is provided
-  if (!status) {
-    return res.status(400).json({ error: "Status is required" });
-  }
+  const updatePostSql = `
+    UPDATE posts 
+    SET title = ?, content = ?, status = ?, ProductName = ? 
+    WHERE id = ?`;
 
-  const updatePostStatusSql = "UPDATE posts SET status = ? WHERE id = ?";
-  pool.query(updatePostStatusSql, [status, id], (err, results) => {
+  pool.query(updatePostSql, [title, content, status, ProductName, id], (err, results) => {
     if (err) {
-      console.error("Database error during post status update:", err);
-      return res.status(500).json({ error: "Error updating post status" });
+      console.error("Database error during updating post:", err);
+      return res.status(500).json({ error: "Error updating post" });
     }
 
     if (results.affectedRows === 0) {
       return res.status(404).json({ error: "Post not found" });
     }
 
-    res.json({ message: "Post status updated successfully" });
+    res.json({ message: "Post updated successfully" });
   });
 });
+
 
 // Delete post by admin
 app.delete("/admin/posts/:id", verifyToken, verifyAdmin, (req, res) => {
@@ -3313,6 +3322,43 @@ app.get("/admin/reported-posts", verifyToken, (req, res) => {
     res.json(results);
   });
 });
+
+app.put("/admin/reports/:reportId", verifyToken, async (req, res) => {
+  const { status } = req.body; // รับสถานะจาก Body
+  const reportId = req.params.reportId; // รับ reportId จากพารามิเตอร์
+
+  // ตรวจสอบว่า role ของผู้ใช้คือแอดมินหรือไม่
+  if (req.role !== "admin") {
+      return res.status(403).json({ error: "Unauthorized access" });
+  }
+
+  // ตรวจสอบว่าสถานะมีค่าหรือไม่
+  if (!status) {
+      return res.status(400).json({ error: "Status is required" });
+  }
+
+  // สร้างคำสั่ง SQL สำหรับการอัปเดตสถานะ
+  const updateReportSql = `
+      UPDATE reports
+      SET status = ?
+      WHERE id = ?;
+  `;
+
+  // ทำการอัปเดตสถานะในฐานข้อมูล
+  pool.query(updateReportSql, [status, reportId], (error, results) => {
+      if (error) {
+          console.error("Database error during updating report:", error);
+          return res.status(500).json({ error: "Error updating report" });
+      }
+      
+      if (results.affectedRows === 0) {
+          return res.status(404).json({ error: "Report not found" });
+      }
+
+      res.json({ message: "Report updated successfully" });
+  });
+});
+
 
 
 
