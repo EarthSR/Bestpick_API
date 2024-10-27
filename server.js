@@ -3045,7 +3045,7 @@ app.delete("/ads/:id", verifyToken, verifyAdmin, (req, res) => {
 });
 
 // Get All Ads
-app.get("/ads",verifyAdmin, (req, res) => {
+app.get("/ads",verifyToken,verifyAdmin, (req, res) => {
   const fetchAdsSql = `SELECT * FROM ads ORDER BY created_at DESC`;
 
   pool.query(fetchAdsSql, (err, results) => {
@@ -3059,7 +3059,7 @@ app.get("/ads",verifyAdmin, (req, res) => {
 });
 
 // Get Ad by ID
-app.get("/ads/:id",verifyAdmin, (req, res) => {
+app.get("/ads/:id",verifyToken,verifyAdmin, (req, res) => {
   const { id } = req.params;
 
   const fetchAdSql = `SELECT * FROM ads WHERE id = ?`;
@@ -3078,7 +3078,7 @@ app.get("/ads/:id",verifyAdmin, (req, res) => {
 });
 
 // Serve Ad Image by ID
-app.get("/ads/:id/image",verifyAdmin, (req, res) => {
+app.get("/ads/:id/image",verifyToken,verifyAdmin, (req, res) => {
   const { id } = req.params;
 
   const fetchAdImageSql = `SELECT image FROM ads WHERE id = ?`;
@@ -3103,7 +3103,7 @@ app.get("/ads/:id/image",verifyAdmin, (req, res) => {
 
 
 // ดึงข้อมูลผู้ใช้ทั้งหมด
-app.get("/admin/users",verifyAdmin, (req, res) => {
+app.get("/admin/users",verifyToken,verifyAdmin, (req, res) => {
   const fetchUsersSql = "SELECT * FROM users"; // คำสั่ง SQL สำหรับดึงข้อมูลผู้ใช้
 
   pool.query(fetchUsersSql, (err, results) => {
@@ -3117,7 +3117,7 @@ app.get("/admin/users",verifyAdmin, (req, res) => {
 });
 
 // ดึงข้อมูลผู้ใช้โดย ID
-app.get("/admin/users/:id",verifyAdmin, (req, res) => {
+app.get("/admin/users/:id",verifyToken,verifyAdmin, (req, res) => {
   const { id } = req.params;
 
 
