@@ -2959,7 +2959,7 @@ app.post("/ads", verifyToken, verifyAdmin, upload.single("image"), (req, res) =>
 });
 
 // สร้าง API สำหรับอัปเดตข้อมูล
-app.put('/ads/:id', upload.single('image'), (req, res) => {
+app.put('/ads/:id', verifyAdmin,upload.single('image'), (req, res) => {
   const { id } = req.params;
   const { title, content, link, created_at, updated_at, status, expiration_date } = req.body;
   const image = req.file ? `/uploads/${req.file.filename}` : null;
@@ -3045,7 +3045,7 @@ app.delete("/ads/:id", verifyToken, verifyAdmin, (req, res) => {
 });
 
 // Get All Ads
-app.get("/ads", (req, res) => {
+app.get("/ads",verifyAdmin, (req, res) => {
   const fetchAdsSql = `SELECT * FROM ads ORDER BY created_at DESC`;
 
   pool.query(fetchAdsSql, (err, results) => {
@@ -3059,7 +3059,7 @@ app.get("/ads", (req, res) => {
 });
 
 // Get Ad by ID
-app.get("/ads/:id", (req, res) => {
+app.get("/ads/:id",verifyAdmin, (req, res) => {
   const { id } = req.params;
 
   const fetchAdSql = `SELECT * FROM ads WHERE id = ?`;
@@ -3078,7 +3078,7 @@ app.get("/ads/:id", (req, res) => {
 });
 
 // Serve Ad Image by ID
-app.get("/ads/:id/image", (req, res) => {
+app.get("/ads/:id/image",verifyAdmin, (req, res) => {
   const { id } = req.params;
 
   const fetchAdImageSql = `SELECT image FROM ads WHERE id = ?`;
@@ -3103,7 +3103,7 @@ app.get("/ads/:id/image", (req, res) => {
 
 
 // ดึงข้อมูลผู้ใช้ทั้งหมด
-app.get("/admin/users", (req, res) => {
+app.get("/admin/users",verifyAdmin, (req, res) => {
   const fetchUsersSql = "SELECT * FROM users"; // คำสั่ง SQL สำหรับดึงข้อมูลผู้ใช้
 
   pool.query(fetchUsersSql, (err, results) => {
@@ -3117,9 +3117,10 @@ app.get("/admin/users", (req, res) => {
 });
 
 // ดึงข้อมูลผู้ใช้โดย ID
-app.get("/admin/users/:id", (req, res) => {
+app.get("/admin/users/:id",verifyAdmin, (req, res) => {
   const { id } = req.params;
-  
+
+
   const fetchUserSql = "SELECT * FROM users WHERE id = ?";
   pool.query(fetchUserSql, [id], (err, results) => {
     if (err) {
