@@ -183,7 +183,7 @@ function sendOtpEmail(email, otp, callback) {
 }
 
 // Register a new email user or reactivate if deactivated
-app.post("/register/email", async (req, res) => {
+app.post("/api/register/email", async (req, res) => {
   try {
     const { email } = req.body;
 
@@ -271,7 +271,7 @@ app.post("/register/email", async (req, res) => {
 
 
 // Verify OTP
-app.post("/register/verify-otp", async (req, res) => {
+app.post("/api/register/verify-otp", async (req, res) => {
   try {
     const { email, otp } = req.body;
     const verifyOtpSql =
@@ -299,7 +299,7 @@ app.post("/register/verify-otp", async (req, res) => {
 });
 
 // Register User
-app.post("/register/set-password", async (req, res) => {
+app.post("/api/register/set-password", async (req, res) => {
   try {
     const { email, password } = req.body;
     const hash = await bcrypt.hash(password, 10);
@@ -321,7 +321,7 @@ app.post("/register/set-password", async (req, res) => {
 });
 
 // Resend OTP for Registration
-app.post("/resend-otp/register", async (req, res) => {
+app.post("/api/resend-otp/register", async (req, res) => {
   try {
     const { email } = req.body;
     const findOtpSql = "SELECT otp, expires_at FROM otps WHERE email = ?";
@@ -364,7 +364,7 @@ app.post("/resend-otp/register", async (req, res) => {
 });
 
 // Forgot Password
-app.post("/forgot-password", async (req, res) => {
+app.post("/api/forgot-password", async (req, res) => {
   try {
     const { email } = req.body;
     const userCheckSql =
@@ -412,7 +412,7 @@ app.post("/forgot-password", async (req, res) => {
 });
 
 // Verify Reset OTP
-app.post("/verify-reset-otp", async (req, res) => {
+app.post("/api/verify-reset-otp", async (req, res) => {
   try {
     const { email, otp } = req.body;
 
@@ -443,7 +443,7 @@ app.post("/verify-reset-otp", async (req, res) => {
 });
 
 // Reset Password
-app.post("/reset-password", async (req, res) => {
+app.post("/api/reset-password", async (req, res) => {
   try {
     const { email, newPassword } = req.body;
     const hashedPassword = await bcrypt.hash(newPassword, 10);
@@ -467,7 +467,7 @@ app.post("/reset-password", async (req, res) => {
 });
 
 // Resend OTP for Reset Password
-app.post("/resent-otp/reset-password", async (req, res) => {
+app.post("/api/resent-otp/reset-password", async (req, res) => {
   try {
     const { email } = req.body;
     const userCheckSql = "SELECT * FROM users WHERE email = ?";
@@ -506,7 +506,7 @@ app.post("/resent-otp/reset-password", async (req, res) => {
 });
 
 // Login
-app.post("/login", async (req, res) => {
+app.post("/api/login", async (req, res) => {
   try {
     const { email, password } = req.body;
 
@@ -600,7 +600,7 @@ app.post("/login", async (req, res) => {
 });
 
 // Set profile route (Profile setup or update)
-app.post("/set-profile", verifyToken, upload.single('picture'), (req, res) => {
+app.post("/api/set-profile", verifyToken, upload.single('picture'), (req, res) => {
   const { newUsername, birthday } = req.body;
   const userId = req.userId;
   const picture = req.file ? `/uploads/${req.file.filename}` : null; 
@@ -641,7 +641,7 @@ app.post("/set-profile", verifyToken, upload.single('picture'), (req, res) => {
 
 
 // Google Sign-In with soft delete handling
-app.post("/google-signin", async (req, res) => {
+app.post("/api/google-signin", async (req, res) => {
   try {
     const { googleId, email } = req.body;
 
@@ -954,7 +954,7 @@ app.get("/api/checkLikeStatus/:postId/:userId", verifyToken, (req, res) => {
 });
 
 // View All Posts with Token Verification
-app.get("/posts", verifyToken, (req, res) => {
+app.get("/api/posts", verifyToken, (req, res) => {
   try {
     const userId = req.userId; // ดึง user_id จาก token ที่ผ่านการตรวจสอบแล้ว
 
@@ -1006,7 +1006,7 @@ app.get("/posts", verifyToken, (req, res) => {
 });
 
 //update status posts
-app.put("/posts/:id/status", verifyToken, (req, res) => {
+app.put("/api/posts/:id/status", verifyToken, (req, res) => {
   const postId = req.params.id;
   const roles = req.role;
 
@@ -1034,31 +1034,10 @@ app.put("/posts/:id/status", verifyToken, (req, res) => {
   });
 });
 
-//1 แก้ ยังไม่ได้เช็ค
+//1 แก้
 
-
-// ฟังก์ชันสำหรับเรียกใช้งาน censor_profanity จาก Python
-function censorContentPython(content) {
-  return new Promise((resolve, reject) => {
-    let options = {
-      mode: 'text',
-      pythonOptions: ['-u', '-X utf8'],
-      scriptPath: './', // path ของไฟล์
-      args: [content]
-    };
-
-    PythonShell.run('botgetprice.py', options, (err, results) => {
-      if (err) {
-        console.error("Error running Python script:", err);  // ข้อความแจ้งเตือนเมื่อเกิดข้อผิดพลาด
-        reject(err);
-      }
-      resolve(results ? results[0] : content); // ส่งคืนผลลัพธ์ที่เซ็นเซอร์แล้วหรือ content เดิมในกรณีที่ไม่มีผลลัพธ์
-    });
-  });
-}
-
-// API สำหรับดูโพสต์เดี่ยวพร้อมตรวจสอบคำหยาบใน content และ title
-app.get("/posts/:id", verifyToken, async (req, res) => {
+// View a Single Post with Like and Comment Count and Show Comments
+app.get("/posts/:id", verifyToken, (req, res) => {
   try {
     const { id } = req.params;
     const userId = req.userId;
@@ -1143,7 +1122,7 @@ app.get("/posts/:id", verifyToken, async (req, res) => {
 
 // Create a Post
 app.post(
-  "/posts/create",
+  "/api/posts/create",
   verifyToken,
   upload.fields([
     { name: "photo", maxCount: 10 },
@@ -1206,7 +1185,7 @@ app.post(
 
 
 // Update a Post
-app.put("/posts/:id", verifyToken, upload.fields([
+app.put("/api/posts/:id", verifyToken, upload.fields([
   { name: "photo", maxCount: 10 },
   { name: "video", maxCount: 10 },
 ]), (req, res) => {
@@ -1282,7 +1261,7 @@ app.put("/posts/:id", verifyToken, upload.fields([
 
 
 // Delete a Post
-app.delete("/posts/:id", verifyToken, (req, res) => {
+app.delete("/api/posts/:id", verifyToken, (req, res) => {
   const { id } = req.params;
   const user_id = req.userId; // Get user ID from the token
 
@@ -1324,7 +1303,7 @@ app.delete("/posts/:id", verifyToken, (req, res) => {
 });
 
 
-app.get("/type", verifyToken, (req, res) => {
+app.get("/api/type", verifyToken, (req, res) => {
   const sqlQuery = "SELECT * FROM category";
 
   // Get a connection from the pool and query the database
@@ -1351,7 +1330,7 @@ app.get("/type", verifyToken, (req, res) => {
 
 
 // API สำหรับกด like หรือ unlike โพสต์
-app.post("/posts/like/:id", verifyToken, (req, res) => {
+app.post("/api/posts/like/:id", verifyToken, (req, res) => {
   const { id } = req.params; // Post ID จาก URL
   const { user_id } = req.body; // User ID จาก body ของ request
 
@@ -1464,10 +1443,8 @@ app.post("/posts/like/:id", verifyToken, (req, res) => {
 // Serve static files (uploaded images and videos)
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
-//แก้5 ยังไม่ได้เช็ค
-
 // Search API with grouped results by username, and include only the first photo_url
-app.get("/search", (req, res) => {
+app.get("/api/search", (req, res) => {
   const { query } = req.query;
 
   if (!query) {
@@ -1479,20 +1456,22 @@ app.get("/search", (req, res) => {
 
   // SQL query to search users and posts
   const searchSql = `
-    SELECT 
-      u.id AS user_id,                -- Include user ID
+SELECT 
+      u.id AS user_id,                
       u.username, 
       u.picture,
-      p.id AS post_id,                -- Include post ID
-      LEFT(p.content, 100) AS content_preview,  -- Show the first 100 characters as a preview
-      p.title,                        -- Include post title
-      p.photo_url                     -- Include the photo_url as a string
-    FROM users u
-    LEFT JOIN posts p ON p.user_id = u.id
-    WHERE LOWER(u.username) LIKE ? 
-      OR LOWER(p.content) LIKE ? 
-      OR LOWER(p.title) LIKE ?        -- Add search condition for title
-    ORDER BY p.updated_at DESC
+      p.id AS post_id,                
+      LEFT(p.content, 100) AS content_preview,  
+      p.title,                        
+      p.photo_url                     
+FROM users u
+LEFT JOIN posts p ON p.user_id = u.id
+WHERE (LOWER(u.username) LIKE ? 
+       OR LOWER(p.content) LIKE ? 
+       OR LOWER(p.title) LIKE ?)
+  AND p.status = 'active'        
+ORDER BY p.updated_at DESC;
+
   `;
 
   pool.query(
@@ -1609,6 +1588,7 @@ app.get("/api/users/:userId/profile", verifyToken, (req, res) => {
       (SELECT COUNT(*) FROM comments WHERE post_id = p.id) AS comment_count
     FROM posts p
     WHERE p.user_id = ?
+    AND p.status = 'active'
     ORDER BY p.updated_at DESC;
   `;
 
@@ -1696,6 +1676,7 @@ app.get("/api/users/:userId/view-profile", verifyToken, async (req, res) => {
       (SELECT COUNT(*) FROM comments WHERE post_id = p.id) AS comment_count
     FROM posts p
     WHERE p.user_id = ?
+    AND p.status = 'active'
     ORDER BY p.updated_at DESC;
   `;
 
@@ -1982,7 +1963,7 @@ app.get("/api/users/:userId/follow/:followingId/status", verifyToken, (req, res)
 
 
 // api comment
-app.post("/posts/:postId/comment", verifyToken, (req, res) => {
+app.post("/api/posts/:postId/comment", verifyToken, (req, res) => {
   try {
     const { postId } = req.params; // ดึง postId จากพารามิเตอร์
     const { content } = req.body; // ดึงเนื้อหาคอมเมนต์จาก Body
@@ -2027,7 +2008,7 @@ app.post("/posts/:postId/comment", verifyToken, (req, res) => {
 
 
 // DELETE /posts/:postId/comment/:commentId
-app.delete("/posts/:postId/comment/:commentId", verifyToken, (req, res) => {
+app.delete("/api/posts/:postId/comment/:commentId", verifyToken, (req, res) => {
   const { postId, commentId } = req.params; // Extract postId and commentId from URL parameters
   const userId = req.userId; // Extract userId from the verified token
 
@@ -2074,7 +2055,7 @@ app.delete("/posts/:postId/comment/:commentId", verifyToken, (req, res) => {
 
 
 
-app.post("/posts/:postId/bookmark", verifyToken, (req, res) => {
+app.post("/api/posts/:postId/bookmark", verifyToken, (req, res) => {
   const { postId } = req.params; // Extract postId from URL parameters
   const userId = req.userId; // Extract userId from the verified token
 
@@ -2142,11 +2123,13 @@ app.get("/api/bookmarks", verifyToken, async (req, res) => {
               WHERE follower_id = ? AND following_id = u.id) > 0 
         THEN TRUE ELSE FALSE 
       END AS is_following 
-    FROM bookmarks b
-    JOIN posts p ON b.post_id = p.id
-    JOIN users u ON p.user_id = u.id
-    WHERE b.user_id = ?
-    ORDER BY b.created_at DESC;
+FROM bookmarks b
+JOIN posts p ON b.post_id = p.id
+JOIN users u ON p.user_id = u.id
+WHERE b.user_id = ? 
+  AND p.status = 'active'
+ORDER BY b.created_at DESC;
+
   `;
 
   pool.query(fetchBookmarksSql, [user_id, user_id], async (err, results) => {
@@ -2473,7 +2456,7 @@ app.get("/api/bookmarks", verifyToken, (req, res) => {
   });
 });
 
-app.get("/posts/:postId/bookmark/status", verifyToken, (req, res) => {
+app.get("/api/posts/:postId/bookmark/status", verifyToken, (req, res) => {
   const { postId } = req.params; // Extract postId from URL parameters
   const userId = req.userId; // Extract userId from the verified token
 
@@ -2566,7 +2549,7 @@ app.get("/api/following/posts", verifyToken, async (req, res) => {
 
 
 // API for reporting a post
-app.post("/posts/:postId/report", verifyToken, (req, res) => {
+app.post("/api/posts/:postId/report", verifyToken, (req, res) => {
   const { postId } = req.params;
   const { reason } = req.body;
   const userId = req.userId; // Extract userId from the token
@@ -2598,7 +2581,7 @@ app.post("/posts/:postId/report", verifyToken, (req, res) => {
 
 
 // API for retrieving all reported posts (admin-only)
-app.get("/reports", verifyToken, (req, res) => {
+app.get("/api/reports", verifyToken, (req, res) => {
   const role = req.role;
 
   // Only allow admin to view reports
@@ -2627,7 +2610,7 @@ app.get("/reports", verifyToken, (req, res) => {
 
 
 // Soft Delete a User, Hard Delete their Posts, and Delete Follows
-app.delete("/users/:id", verifyToken, (req, res) => {
+app.delete("/api/users/:id", verifyToken, (req, res) => {
   const { id } = req.params;
   const user_id = req.userId; // Get user ID from the token
 
@@ -2829,7 +2812,7 @@ app.get('/api/bookmarks/:post_id', verifyToken, (req, res) => {
 
 // ########################################################## admin #################################################
 // Admin Login Route
-app.post("/admin/login", async (req, res) => {
+app.post("/api/admin/login", async (req, res) => {
   try {
     const { email, password } = req.body;
 
@@ -2896,7 +2879,7 @@ app.post("/admin/login", async (req, res) => {
 });
 
 // Admin Dashboard: New Users per Day and Total Posts per Day
-app.get("/admin/dashboard", verifyToken, (req, res) => {
+app.get("/api/admin/dashboard", verifyToken, (req, res) => {
   // Check if the logged-in user is an admin
   if (req.role !== "admin") {
     return res.status(403).json({ error: "Unauthorized access" });
@@ -2946,7 +2929,7 @@ app.get("/admin/dashboard", verifyToken, (req, res) => {
 });
 
 // Fetch All Active Ads in Random Order
-app.get("/ads/random", (req, res) => {
+app.get("/api/ads/random", (req, res) => {
   const fetchRandomAdsSql = `
     SELECT * FROM ads 
     WHERE status = 'active'
@@ -2975,10 +2958,10 @@ const verifyAdmin = (req, res, next) => {
 };
 
 // Serve images from the uploads directory
-app.use('/uploads', express.static('uploads'));
+app.use('/api/uploads', express.static('uploads'));
 
 // Create an Ad (Admin only)
-app.post("/ads", verifyToken, verifyAdmin, upload.single("image"), (req, res) => {
+app.post("/api/ads", verifyToken, verifyAdmin, upload.single("image"), (req, res) => {
   const { title, content, link, status, expiration_date } = req.body;
   const image = req.file ? `/uploads/${req.file.filename}` : null;
 
@@ -2999,9 +2982,9 @@ app.post("/ads", verifyToken, verifyAdmin, upload.single("image"), (req, res) =>
 });
 
 // สร้าง API สำหรับอัปเดตข้อมูล
-app.put('/ads/:id', upload.single('image'), (req, res) => {
+app.put('/api/ads/:id', verifyAdmin,upload.single('image'), (req, res) => {
   const { id } = req.params;
-  const { title, content, link, created_at, updated_at } = req.body;
+  const { title, content, link, created_at, updated_at, status, expiration_date } = req.body;
   const image = req.file ? `/uploads/${req.file.filename}` : null;
 
   const updateFields = [];
@@ -3023,6 +3006,10 @@ app.put('/ads/:id', upload.single('image'), (req, res) => {
     updateFields.push('image = ?');
     updateValues.push(image);
   }
+  if (status) {
+    updateFields.push('status = ?'); // แก้ไขการเพิ่มสถานะ
+    updateValues.push(status); // แทรกค่า status
+  }
   if (created_at) {
     updateFields.push('created_at = ?');
     updateValues.push(created_at);
@@ -3030,6 +3017,10 @@ app.put('/ads/:id', upload.single('image'), (req, res) => {
   if (updated_at) {
     updateFields.push('updated_at = ?');
     updateValues.push(updated_at);
+  }
+  if (expiration_date) {
+    updateFields.push('expiration_date = ?'); // เพิ่มการจัดการ expiration_date
+    updateValues.push(expiration_date); // แทรกค่า expiration_date
   }
 
   if (updateFields.length === 0) {
@@ -3056,8 +3047,9 @@ app.put('/ads/:id', upload.single('image'), (req, res) => {
 
 
 
+
 // Delete an Ad (Admin only)
-app.delete("/ads/:id", verifyToken, verifyAdmin, (req, res) => {
+app.delete("/api/ads/:id", verifyToken, verifyAdmin, (req, res) => {
   const { id } = req.params;
 
   const deleteAdSql = `DELETE FROM ads WHERE id = ?`;
@@ -3076,7 +3068,7 @@ app.delete("/ads/:id", verifyToken, verifyAdmin, (req, res) => {
 });
 
 // Get All Ads
-app.get("/ads", (req, res) => {
+app.get("/api/ads",verifyToken,verifyAdmin, (req, res) => {
   const fetchAdsSql = `SELECT * FROM ads ORDER BY created_at DESC`;
 
   pool.query(fetchAdsSql, (err, results) => {
@@ -3090,7 +3082,7 @@ app.get("/ads", (req, res) => {
 });
 
 // Get Ad by ID
-app.get("/ads/:id", (req, res) => {
+app.get("/api/ads/:id",verifyToken,verifyAdmin, (req, res) => {
   const { id } = req.params;
 
   const fetchAdSql = `SELECT * FROM ads WHERE id = ?`;
@@ -3109,7 +3101,7 @@ app.get("/ads/:id", (req, res) => {
 });
 
 // Serve Ad Image by ID
-app.get("/ads/:id/image", (req, res) => {
+app.get("/api/ads/:id/image",verifyToken,verifyAdmin, (req, res) => {
   const { id } = req.params;
 
   const fetchAdImageSql = `SELECT image FROM ads WHERE id = ?`;
@@ -3134,7 +3126,7 @@ app.get("/ads/:id/image", (req, res) => {
 
 
 // ดึงข้อมูลผู้ใช้ทั้งหมด
-app.get("/admin/users", (req, res) => {
+app.get("/api/admin/users",verifyToken,verifyAdmin, (req, res) => {
   const fetchUsersSql = "SELECT * FROM users"; // คำสั่ง SQL สำหรับดึงข้อมูลผู้ใช้
 
   pool.query(fetchUsersSql, (err, results) => {
@@ -3148,9 +3140,10 @@ app.get("/admin/users", (req, res) => {
 });
 
 // ดึงข้อมูลผู้ใช้โดย ID
-app.get("/admin/users/:id", (req, res) => {
+app.get("/api/admin/users/:id",verifyToken,verifyAdmin, (req, res) => {
   const { id } = req.params;
-  
+
+
   const fetchUserSql = "SELECT * FROM users WHERE id = ?";
   pool.query(fetchUserSql, [id], (err, results) => {
     if (err) {
@@ -3167,7 +3160,7 @@ app.get("/admin/users/:id", (req, res) => {
 });
 
 // Edit user status by admin
-app.put("/admin/users/:id/status", verifyToken, verifyAdmin, (req, res) => {
+app.put("/api/admin/users/:id/status", verifyToken, verifyAdmin, (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
 
@@ -3193,7 +3186,7 @@ app.put("/admin/users/:id/status", verifyToken, verifyAdmin, (req, res) => {
 
 
 // Soft Delete a User, Hard Delete their Posts, and Delete Follows (Admin-Only)
-app.delete("/admin/users/:id", verifyToken, (req, res) => {
+app.delete("/api/admin/users/:id", verifyToken, (req, res) => {
   const { id } = req.params;
 
   // Only allow admins to delete users
@@ -3240,7 +3233,7 @@ app.delete("/admin/users/:id", verifyToken, (req, res) => {
 });
 
 // Get all posts
-app.get("/admin/posts", verifyToken, verifyAdmin, (req, res) => {
+app.get("/api/admin/posts", verifyToken, verifyAdmin, (req, res) => {
   const fetchPostsSql = "SELECT * FROM posts"; // ดึงข้อมูลโพสต์ทั้งหมด
   pool.query(fetchPostsSql, (err, results) => {
     if (err) {
@@ -3253,7 +3246,7 @@ app.get("/admin/posts", verifyToken, verifyAdmin, (req, res) => {
 });
 
 // Get post by ID
-app.get("/admin/posts/:id", verifyToken, verifyAdmin, (req, res) => {
+app.get("/api/admin/posts/:id", verifyToken, verifyAdmin, (req, res) => {
   const { id } = req.params;
 
   const fetchPostSql = "SELECT * FROM posts WHERE id = ?";
@@ -3273,32 +3266,32 @@ app.get("/admin/posts/:id", verifyToken, verifyAdmin, (req, res) => {
 
 
 // Update post status by admin
-app.put("/admin/posts/:id/status", verifyToken, verifyAdmin, (req, res) => {
+app.put("/api/admin/posts/:id", verifyToken, verifyAdmin, (req, res) => {
   const { id } = req.params;
-  const { status } = req.body;
+  const { title, content, status, ProductName } = req.body;
 
-  // Validate that the status field is provided
-  if (!status) {
-    return res.status(400).json({ error: "Status is required" });
-  }
+  const updatePostSql = `
+    UPDATE posts 
+    SET title = ?, content = ?, status = ?, ProductName = ? 
+    WHERE id = ?`;
 
-  const updatePostStatusSql = "UPDATE posts SET status = ? WHERE id = ?";
-  pool.query(updatePostStatusSql, [status, id], (err, results) => {
+  pool.query(updatePostSql, [title, content, status, ProductName, id], (err, results) => {
     if (err) {
-      console.error("Database error during post status update:", err);
-      return res.status(500).json({ error: "Error updating post status" });
+      console.error("Database error during updating post:", err);
+      return res.status(500).json({ error: "Error updating post" });
     }
 
     if (results.affectedRows === 0) {
       return res.status(404).json({ error: "Post not found" });
     }
 
-    res.json({ message: "Post status updated successfully" });
+    res.json({ message: "Post updated successfully" });
   });
 });
 
+
 // Delete post by admin
-app.delete("/admin/posts/:id", verifyToken, verifyAdmin, (req, res) => {
+app.delete("/api/admin/posts/:id", verifyToken, verifyAdmin, (req, res) => {
   const { id } = req.params;
 
   const deletePostSql = "DELETE FROM posts WHERE id = ?";
@@ -3315,6 +3308,83 @@ app.delete("/admin/posts/:id", verifyToken, verifyAdmin, (req, res) => {
     res.json({ message: "Post deleted successfully" });
   });
 });
+
+// API สำหรับแอดมินในการดูโพสต์ที่ถูกรีพอร์ต
+app.get("/api/admin/reported-posts", verifyToken, (req, res) => {
+  // ตรวจสอบว่า role ของผู้ใช้คือแอดมินหรือไม่
+  if (req.role !== "admin") {
+    return res.status(403).json({ error: "Unauthorized access" });
+  }
+
+  const fetchReportedPostsSql = `
+    SELECT 
+      r.id AS report_id,
+      r.post_id,
+      r.user_id AS reported_by_user_id,
+      r.reason,
+      r.reported_at,
+      p.title AS post_title,
+      p.content AS post_content,
+      r.status,
+      u.username AS reported_by_username,
+      u.picture AS reported_by_user_profile,
+      pu.username AS post_owner_username,
+      pu.picture AS post_owner_profile
+    FROM reports r
+    JOIN posts p ON r.post_id = p.id
+    JOIN users u ON r.user_id = u.id
+    JOIN users pu ON p.user_id = pu.id
+    WHERE r.status = 'pending'
+    ORDER BY r.reported_at DESC;
+  `;
+
+  pool.query(fetchReportedPostsSql, (error, results) => {
+    if (error) {
+      console.error("Database error during fetching reported posts:", error);
+      return res.status(500).json({ error: "Error fetching reported posts" });
+    }
+
+    res.json(results);
+  });
+});
+
+app.put("/api/admin/reports/:reportId", verifyToken, async (req, res) => {
+  const { status } = req.body; // รับสถานะจาก Body
+  const reportId = req.params.reportId; // รับ reportId จากพารามิเตอร์
+
+  // ตรวจสอบว่า role ของผู้ใช้คือแอดมินหรือไม่
+  if (req.role !== "admin") {
+      return res.status(403).json({ error: "Unauthorized access" });
+  }
+
+  // ตรวจสอบว่าสถานะมีค่าหรือไม่
+  if (!status) {
+      return res.status(400).json({ error: "Status is required" });
+  }
+
+  // สร้างคำสั่ง SQL สำหรับการอัปเดตสถานะ
+  const updateReportSql = `
+      UPDATE reports
+      SET status = ?
+      WHERE id = ?;
+  `;
+
+  // ทำการอัปเดตสถานะในฐานข้อมูล
+  pool.query(updateReportSql, [status, reportId], (error, results) => {
+      if (error) {
+          console.error("Database error during updating report:", error);
+          return res.status(500).json({ error: "Error updating report" });
+      }
+      
+      if (results.affectedRows === 0) {
+          return res.status(404).json({ error: "Report not found" });
+      }
+
+      res.json({ message: "Report updated successfully" });
+  });
+});
+
+
 
 
 
