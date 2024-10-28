@@ -28,12 +28,12 @@ def censor_profanity(sentence):
     for word in words:
         try:
             word_vectorized = vectorizer.transform([word])
-        except Exception:
-            censored_words.append(word)
+        except Exception as e:
+            censored_words.append(word)  # คืนค่าคำเดิมหากมีปัญหาในการประมวลผล
             continue
 
         if word_vectorized.nnz == 0:
-            censored_words.append(word)
+            censored_words.append(word)  # คำที่ไม่สามารถแปลงเป็นฟีเจอร์ได้
             continue
 
         prediction = model.predict(word_vectorized)
