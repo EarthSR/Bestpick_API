@@ -5,6 +5,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.sql import text
 import pandas as pd
 import pickle
+import io
+
+# Set standard output and error encoding to UTF-8
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 # โหลดโมเดลและ vectorizer จากไฟล์ .pkl
 with open('thai_profanity_model.pkl', 'rb') as model_file:
