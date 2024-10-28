@@ -2735,7 +2735,7 @@ app.get("/api/users/search/following", verifyToken, (req, res) => {
       u.picture AS profileImageUrl
     FROM follower_following f
     JOIN users u ON f.following_id = u.id
-    WHERE f.follower_id = ? AND LOWER(u.username) LIKE ?;
+    WHERE f.follower_id = ? AND LOWER(u.username) LIKE ? AND u.status = 'active';
   `;
 
   pool.query(searchFollowingSql, [followerId, searchValue], (err, results) => {
@@ -2768,7 +2768,7 @@ app.get("/api/users/search/followers", verifyToken, (req, res) => {
       u.picture AS profileImageUrl
     FROM follower_following f
     JOIN users u ON f.follower_id = u.id
-    WHERE f.following_id = ? AND LOWER(u.username) LIKE ?;
+    WHERE f.following_id = ? AND LOWER(u.username) LIKE ? AND u.status = 'active';
   `;
 
   pool.query(searchFollowersSql, [followingId, searchValue], (err, results) => {
