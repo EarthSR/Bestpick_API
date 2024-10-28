@@ -1476,7 +1476,7 @@ LEFT JOIN posts p ON p.user_id = u.id
 WHERE (LOWER(u.username) LIKE ? 
        OR LOWER(p.content) LIKE ? 
        OR LOWER(p.title) LIKE ?)
-  AND p.status = 'active'        
+  AND u.status = 'active'        
 ORDER BY p.updated_at DESC;
 
   `;
