@@ -250,7 +250,7 @@ def recommend_posts_for_user(user_id, alpha=0.7):
 
 
 # Configure your database URI
-app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+mysqlconnector://bestpick7890@localhost/reviewapp'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+mysqlconnector://bestpick_user:bestpick7890@localhost/reviewapp'
 
 # Initialize the SQLAlchemy object
 db = SQLAlchemy(app)
@@ -327,7 +327,7 @@ def censor_profanity(sentence):
 # ฟังก์ชันดึงข้อมูลจากฐานข้อมูลและเซ็นเซอร์
 def fetch_and_censor_from_db():
 
-    engine = create_engine('mysql+mysqlconnector://bestpick7890@localhost/reviewapp')
+    engine = create_engine('mysql+mysqlconnector://bestpick_user:bestpick7890@localhost/reviewapp')
 
     # ดึงข้อมูลจากฐานข้อมูล (ปรับ query ตามที่ต้องการ)
     query = "SELECT id, Title, content FROM posts WHERE status='active';"
