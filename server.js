@@ -2984,7 +2984,7 @@ app.post("/api/ads", verifyToken, verifyAdmin, upload.single("image"), (req, res
 });
 
 // สร้าง API สำหรับอัปเดตข้อมูล
-app.put('/api/ads/:id', verifyAdmin,upload.single('image'), (req, res) => {
+app.put('/api/ads/:id',verifyToken,verifyAdmin,upload.single('image'), (req, res) => {
   const { id } = req.params;
   const { title, content, link, created_at, updated_at, status, expiration_date } = req.body;
   const image = req.file ? `/uploads/${req.file.filename}` : null;
