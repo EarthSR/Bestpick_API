@@ -2096,8 +2096,8 @@ app.post("/api/posts/:postId/bookmark", verifyToken, (req, res) => {
 
 //แก้3 ยังไม่ได้เช็ค
 
-// API for fetching user's bookmarked posts with profanity checking
-app.get("/api/bookmarks", verifyToken, async (req, res) => {
+// API for fetching user's bookmarked posts
+app.get("/api/bookmarks", verifyToken, (req, res) => {
   const user_id = req.userId; // Get user_id from token
 
   // SQL query to fetch bookmarked posts with like and comment counts and follow status
@@ -2129,7 +2129,9 @@ ORDER BY b.created_at DESC;
 
   `;
 
-  pool.query(fetchBookmarksSql, [user_id, user_id], async (err, results) => {
+//แก้3
+
+  pool.query(fetchBookmarksSql, [user_id, user_id], (err, results) => {
     if (err) {
       console.error("Database error during fetching bookmarks:", err);
       return res.status(500).json({ error: "Error fetching bookmarks" });
@@ -2139,61 +2141,56 @@ ORDER BY b.created_at DESC;
       return res.status(404).json({ message: "No bookmarks found." });
     }
 
-    // Process each bookmark for censoring title and content
-    const formattedBookmarks = await Promise.all(
-      results.map(async (post) => {
-        let photos = [];
-        let videos = [];
+    // Process photo_url and video_url as JSON arrays and format the response
+    const formattedBookmarks = results.map((post) => {
+      let photos = [];
+      let videos = [];
 
-        // Handle photo_url (if it's a JSON string, parse it into an array)
-        if (typeof post.photo_url === "string") {
-          try {
-            photos = JSON.parse(post.photo_url);
-          } catch (e) {
-            console.error("Error parsing photo_url:", e.message);
-          }
-        } else if (Array.isArray(post.photo_url)) {
-          photos = post.photo_url;
+      // Handle photo_url (if it's a JSON string, parse it into an array)
+      if (typeof post.photo_url === "string") {
+        try {
+          photos = JSON.parse(post.photo_url);
+        } catch (e) {
+          console.error("Error parsing photo_url:", e.message);
         }
+      } else if (Array.isArray(post.photo_url)) {
+        photos = post.photo_url;
+      }
 
-        // Handle video_url (if it's a JSON string, parse it into an array)
-        if (typeof post.video_url === "string") {
-          try {
-            videos = JSON.parse(post.video_url);
-          } catch (e) {
-            console.error("Error parsing video_url:", e.message);
-          }
-        } else if (Array.isArray(post.video_url)) {
-          videos = post.video_url;
+      // Handle video_url (if it's a JSON string, parse it into an array)
+      if (typeof post.video_url === "string") {
+        try {
+          videos = JSON.parse(post.video_url);
+        } catch (e) {
+          console.error("Error parsing video_url:", e.message);
         }
+      } else if (Array.isArray(post.video_url)) {
+        videos = post.video_url;
+      }
 
-        // เซ็นเซอร์คำหยาบใน title และ content
-        const censoredTitle = await censorContentPython(post.title);
-        const censoredContent = await censorContentPython(post.content);
+      return {
+        post_id: post.post_id,
+        title: post.title,
+        content: post.content,
+        created_at: post.updated_at,
+        like_count: post.like_count,
+        comment_count: post.comment_count,
+        photos, // formatted photos array
+        videos, // formatted videos array
+        author: {
+          user_id: post.user_id,
+          username: post.author_username,
+          profile_image: post.author_profile_image,
+        },
+        is_following: post.is_following === 1, // Convert 1 to true and 0 to false
+      };
+    });
 
-        return {
-          post_id: post.post_id,
-          title: censoredTitle,
-          content: censoredContent,
-          created_at: post.updated_at,
-          like_count: post.like_count,
-          comment_count: post.comment_count,
-          photos, // formatted photos array
-          videos, // formatted videos array
-          author: {
-            user_id: post.user_id,
-            username: post.author_username,
-            profile_image: post.author_profile_image,
-          },
-          is_following: post.is_following === 1, // Convert 1 to true and 0 to false
-        };
-      })
-    );
-
-    // Return the formatted bookmarks with profanity checking
+    // Return the formatted bookmarks
     res.json({ bookmarks: formattedBookmarks });
   });
 });
+
 
 
 
@@ -2472,12 +2469,12 @@ app.get("/api/posts/:postId/bookmark/status", verifyToken, (req, res) => {
   });
 });
 
-//แก้4 ยังไม่ได้เช็ค
-
 
 // API to get posts from followed users
-app.get("/api/following/posts", verifyToken, async (req, res) => {
+app.get("/api/following/posts", verifyToken, (req, res) => {
   const userId = req.userId; // The logged-in user who is following others
+
+//แก้4
 
   const getFollowedPostsSql = `
     SELECT 
@@ -2500,48 +2497,40 @@ app.get("/api/following/posts", verifyToken, async (req, res) => {
     ORDER BY p.updated_at DESC;
   `;
 
-  pool.query(getFollowedPostsSql, [userId, userId], async (error, results) => {
+  pool.query(getFollowedPostsSql, [userId, userId], (error, results) => {
     if (error) {
       return res.status(500).json({ error: "Database error during fetching followed posts." });
     }
 
+    // If there are no followed posts, return an empty array
     if (results.length === 0) {
       return res.status(200).json({ message: "No posts from followed users.", posts: [] });
     }
 
-    // Process each post for censoring title and content
-    const parsedResults = await Promise.all(
-      results.map(async (post) => {
-        // เซ็นเซอร์คำหยาบใน title และ content
-        const censoredTitle = await censorContentPython(post.title);
-        const censoredContent = await censorContentPython(post.content);
+    // Format the response and send it
+    const parsedResults = results.map((post) => {
+      const photoUrls = Array.isArray(post.photoUrl) ? post.photoUrl : []; // Fix: Use 'photoUrl' for consistency
+      const videoUrls = Array.isArray(post.videoUrl) ? post.videoUrl : []; // Fix: Use 'videoUrl' for consistency
 
-        // Convert photo and video URLs to arrays if needed
-        const photoUrls = Array.isArray(post.photoUrl) ? post.photoUrl : [];
-        const videoUrls = Array.isArray(post.videoUrl) ? post.videoUrl : [];
+      return {
+        id: post.id,
+        userId: post.userId,
+        title: post.title,
+        content: post.content,
+        updated: post.updated, 
+        photo_url: photoUrls,
+        video_url: videoUrls,
+        userName: post.userName,
+        userProfileUrl: post.userProfileUrl,
+        likeCount: post.likeCount || 0,
+        commentCount: post.commentCount || 0,
+        isLiked: !!post.is_liked, // Convert to Boolean
+      };
+    });
 
-        return {
-          id: post.id,
-          userId: post.userId,
-          title: censoredTitle,
-          content: censoredContent,
-          updated: post.updated, 
-          photo_url: photoUrls,
-          video_url: videoUrls,
-          userName: post.userName,
-          userProfileUrl: post.userProfileUrl,
-          likeCount: post.likeCount || 0,
-          commentCount: post.commentCount || 0,
-          isLiked: !!post.is_liked,
-        };
-      })
-    );
-
-    res.status(200).json({ posts: parsedResults });
+    res.status(200).json({ posts: parsedResults }); // Return the parsed results
   });
 });
-
-
 
 
 
