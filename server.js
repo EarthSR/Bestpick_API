@@ -2322,29 +2322,43 @@ app.get("/api/notifications", verifyToken, (req, res) => {
 
 
 
-// API สำหรับทำการอ่านของ Notification ตาม ID
+// API สำหรับอัปเดตสถานะการอ่านของ Notification ตาม ID
 app.put("/api/notifications/:id/read", verifyToken, (req, res) => {
-  const { id } = req.params;
-  const userId = req.userId;
+  const { id } = req.params;  // รับ notification ID จาก URL พารามิเตอร์
+  const userId = req.userId;  // รับ userId ที่ได้จาก verifyToken middleware
 
+  // log ค่า ID และ userId สำหรับการดีบัก
+  console.log("Notification ID:", id);
+  console.log("User ID from Token:", userId);
 
+  // คำสั่ง SQL สำหรับการอัปเดตสถานะการอ่านของ Notification
   const updateReadStatusSql = `
     UPDATE notifications
     SET read_status = 1
     WHERE id = ? AND user_id = ?;
   `;
 
+  // เรียกคำสั่ง SQL
   pool.query(updateReadStatusSql, [id, userId], (error, results) => {
     if (error) {
+      // หากเกิดข้อผิดพลาดในการทำงานกับฐานข้อมูล
       console.error("Database error during updating read status:", error);
       return res.status(500).json({ error: "Error updating read status" });
     }
+    
+    // ตรวจสอบว่ามีการอัปเดตหรือไม่
     if (results.affectedRows === 0) {
+      // log กรณีไม่พบ notification หรือตรวจสอบว่าผู้ใช้ไม่ใช่เจ้าของ
+      console.warn(`Notification not found or not owned by user (ID: ${userId})`);
       return res.status(404).json({ message: "Notification not found or you are not the owner" });
     }
+
+    // หากอัปเดตสำเร็จ
+    console.log("Notification marked as read for ID:", id);
     res.json({ message: "Notification marked as read" });
   });
 });
+
 
 
 
