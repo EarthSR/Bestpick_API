@@ -3152,11 +3152,11 @@ app.put("/api/admin/users/:id/status", verifyToken, verifyAdmin, (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
 
+  
   // Validate that the status field is provided
   if (!status) {
     return res.status(400).json({ error: "Status is required" });
   }
-
   const updateStatusSql = "UPDATE users SET status = ? WHERE id = ?";
   pool.query(updateStatusSql, [status, id], (err, results) => {
     if (err) {
@@ -3256,14 +3256,14 @@ app.get("/api/admin/posts/:id", verifyToken, verifyAdmin, (req, res) => {
 // Update post status by admin
 app.put("/api/admin/posts/:id", verifyToken, verifyAdmin, (req, res) => {
   const { id } = req.params;
-  const { title, content, status, ProductName } = req.body;
+  const { Title, content, status, ProductName } = req.body;
 
   const updatePostSql = `
     UPDATE posts 
-    SET title = ?, content = ?, status = ?, ProductName = ? 
+    SET Title = ?, content = ?, status = ?, ProductName = ? 
     WHERE id = ?`;
 
-  pool.query(updatePostSql, [title, content, status, ProductName, id], (err, results) => {
+  pool.query(updatePostSql, [Title, content, status, ProductName, id], (err, results) => {
     if (err) {
       console.error("Database error during updating post:", err);
       return res.status(500).json({ error: "Error updating post" });
