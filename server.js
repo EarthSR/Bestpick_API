@@ -3386,6 +3386,82 @@ app.put("/api/admin/reports/:reportId", verifyToken, async (req, res) => {
   });
 });
 
+// Get All Categories
+app.get('/api/categories', verifyToken, verifyAdmin, (req, res) => {
+  const fetchCategoriesSql = 'SELECT * FROM category ORDER BY CategoryID ASC';
+  
+  pool.query(fetchCategoriesSql, (err, results) => {
+    if (err) {
+      console.error("Database error during fetching categories:", err);
+      return res.status(500).json({ error: "Error fetching categories" });
+    }
+    res.json(results);
+  });
+});
+
+// Create a Category
+app.post('/api/categories', verifyToken, verifyAdmin, (req, res) => {
+  const { CategoryName } = req.body;
+
+  if (!CategoryName) {
+    return res.status(400).json({ error: "CategoryName is required" });
+  }
+
+  const createCategorySql = 'INSERT INTO category (CategoryName) VALUES (?)'; // แก้ไขที่นี่
+  pool.query(createCategorySql, [CategoryName], (err, results) => {
+    if (err) {
+      console.error("Database error during category creation:", err);
+      return res.status(500).json({ error: "Error creating category" });
+    }
+    res.status(201).json({ message: "Category created successfully", categoryId: results.insertId });
+  });
+});
+
+// Update a Category
+app.put('/api/categories/:id', verifyToken, verifyAdmin, (req, res) => {
+  const { id } = req.params;
+  const { CategoryName } = req.body;
+
+  if (!CategoryName) {
+    return res.status(400).json({ error: "CategoryName is required" });
+  }
+
+  const updateCategorySql = 'UPDATE category SET CategoryName = ? WHERE CategoryID = ?'; // แก้ไขที่นี่
+  pool.query(updateCategorySql, [CategoryName, id], (err, results) => {
+    if (err) {
+      console.error("Database error during category update:", err);
+      return res.status(500).json({ error: "Error updating category" });
+    }
+
+    if (results.affectedRows === 0) {
+      return res.status(404).json({ error: "Category not found" });
+    }
+
+    res.json({ message: "Category updated successfully" });
+  });
+});
+
+// Delete a Category
+app.delete('/api/categories/:id', verifyToken, verifyAdmin, (req, res) => {
+  const { id } = req.params;
+
+  const deleteCategorySql = 'DELETE FROM category WHERE CategoryID = ?'; // แก้ไขที่นี่
+  pool.query(deleteCategorySql, [id], (err, results) => {
+    if (err) {
+      console.error("Database error during category deletion:", err);
+      return res.status(500).json({ error: "Error deleting category" });
+    }
+
+    if (results.affectedRows === 0) {
+      return res.status(404).json({ error: "Category not found" });
+    }
+
+    res.json({ message: "Category deleted successfully" });
+  });
+});
+
+
+
 
 
 
