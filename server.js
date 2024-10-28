@@ -3461,6 +3461,57 @@ app.delete('/api/categories/:id', verifyToken, verifyAdmin, (req, res) => {
 });
 
 
+app.put("/api/admin/update/poststatus", verifyToken, verifyAdmin, (req, res) => {
+  const { id } = req.body; // รับ id จาก Body
+
+  // ตรวจสอบว่ามีการส่ง id มาหรือไม่
+  if (!id) {
+    return res.status(400).json({ error: "Post ID is required" });
+  }
+
+  // ตรวจสอบว่าโพสต์มีอยู่ในตาราง reports หรือไม่
+  const checkPostInReportsSql = "SELECT * FROM reports WHERE post_id = ?";
+  pool.query(checkPostInReportsSql, [id], (checkErr, checkResults) => {
+    if (checkErr) {
+      console.error("Database error during checking post in reports:", checkErr);
+      return res.status(500).json({ error: "Error checking post in reports" });
+    }
+
+    if (checkResults.length === 0) {
+      return res.status(404).json({ error: "Post not found in reports" });
+    }
+
+    // สร้างคำสั่ง SQL สำหรับการอัปเดตสถานะโพสต์เป็น 'deactivate'
+    const updatePostStatusSql = `
+      UPDATE posts 
+      SET status = 'deactivate' 
+      WHERE id = ?;
+    `;
+
+    // ทำการอัปเดตสถานะในฐานข้อมูล
+    pool.query(updatePostStatusSql, [id], (err, results) => {
+      if (err) {
+        console.error("Database error during updating post status:", err);
+        return res.status(500).json({ error: "Error updating post status" });
+      }
+
+      if (results.affectedRows === 0) {
+        return res.status(404).json({ error: "Post not found" });
+      }
+
+      // ลบโพสต์จากตาราง reports
+      const deleteReportSql = "DELETE FROM reports WHERE post_id = ?";
+      pool.query(deleteReportSql, [id], (deleteErr) => {
+        if (deleteErr) {
+          console.error("Database error during deleting report:", deleteErr);
+          return res.status(500).json({ error: "Error deleting report" });
+        }
+
+        res.json({ message: "Post status updated to deactivate successfully and report deleted" });
+      });
+    });
+  });
+});
 
 
 
