@@ -1040,7 +1040,7 @@ app.put("/api/posts/:id/status", verifyToken, (req, res) => {
 app.get("/api/posts/:id", verifyToken, (req, res) => {
   try {
     const { id } = req.params;
-    const userId = req.userId;
+    const userId = req.userId; // ดึง user_id จาก token ที่ผ่านการตรวจสอบแล้ว
 
     const queryPost = `
       SELECT p.*, u.username, u.picture, 
@@ -1052,42 +1052,45 @@ app.get("/api/posts/:id", verifyToken, (req, res) => {
       WHERE p.id = ?;
     `;
 
-    pool.query(queryPost, [id, id, id, userId, id], async (err, postResults) => {
+    const queryComments = `
+      SELECT c.*, u.username, u.picture AS user_profile
+      FROM comments c
+      JOIN users u ON c.user_id = u.id
+      WHERE c.post_id = ?;
+    `;
+
+    pool.query(queryPost, [id, id, id, userId, id], (err, postResults) => {
       if (err) {
         console.error("Database error during post retrieval:", err);
-        return res.status(500).json({ error: "Internal server error during post retrieval" });
+        return res
+          .status(500)
+          .json({ error: "Internal server error during post retrieval" });
       }
 
       if (postResults.length === 0) {
         return res.status(404).json({ error: "Post not found" });
       }
 
-      let post = postResults[0];
-      post.photo_url = isValidJson(post.photo_url) ? JSON.parse(post.photo_url) : [post.photo_url];
-      post.video_url = isValidJson(post.video_url) ? JSON.parse(post.video_url) : [post.video_url];
-      post.is_liked = post.is_liked > 0;
+      const post = postResults[0];
+      console.log("Post data fetched:", post); // เพิ่ม log เพื่อตรวจสอบข้อมูลโพสต์
 
-      try {
-        // ตรวจสอบและเซ็นเซอร์คำหยาบใน title และ content
-        post.Title = await censorContentPython(post.Title);
-        post.content = await censorContentPython(post.content);
-      } catch (censorError) {
-        console.error("Error during profanity censorship:", censorError);
-        return res.status(500).json({ error: "Profanity censorship failed" });
-      }
-
-      const queryComments = `
-        SELECT c.*, u.username, u.picture AS user_profile
-        FROM comments c
-        JOIN users u ON c.user_id = u.id
-        WHERE c.post_id = ?;
-      `;
+      post.photo_url = isValidJson(post.photo_url)
+        ? JSON.parse(post.photo_url)
+        : [post.photo_url];
+      post.video_url = isValidJson(post.video_url)
+        ? JSON.parse(post.video_url)
+        : [post.video_url];
+      post.is_liked = post.is_liked > 0; // แปลงค่า is_liked ให้เป็น boolean
 
       pool.query(queryComments, [id], (err, commentResults) => {
         if (err) {
           console.error("Database error during comments retrieval:", err);
-          return res.status(500).json({ error: "Internal server error during comments retrieval" });
+          return res
+            .status(500)
+            .json({ error: "Internal server error during comments retrieval" });
         }
+
+        console.log("Comment data fetched:", commentResults); // เพิ่ม log เพื่อตรวจสอบข้อมูลคอมเมนต์
 
         res.json({
           ...post,
@@ -1095,14 +1098,14 @@ app.get("/api/posts/:id", verifyToken, (req, res) => {
           productName: post.ProductName,
           comment_count: post.comment_count,
           update: post.updated_at,
-          is_liked: post.is_liked,
+          is_liked: post.is_liked, // เพิ่มสถานะการไลค์ของผู้ใช้ในข้อมูลโพสต์
           comments: commentResults.map((comment) => ({
             id: comment.id,
             user_id: comment.user_id,
             content: comment.comment_text,
             created_at: comment.created_at,
             username: comment.username,
-            user_profile: comment.user_profile || null,
+            user_profile: comment.user_profile ? comment.user_profile : null,
           })),
         });
       });
@@ -1112,7 +1115,6 @@ app.get("/api/posts/:id", verifyToken, (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 });
-
 
 
 
