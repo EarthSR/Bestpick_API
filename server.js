@@ -368,7 +368,7 @@ app.post("/api/forgot-password", async (req, res) => {
   try {
     const { email } = req.body;
     const userCheckSql =
-      "SELECT * FROM users WHERE email = ? AND password IS NOT NULL";
+      "SELECT * FROM users WHERE email = ? AND password IS NOT NULL AND status = 'active'";
 
     pool.query(userCheckSql, [email], (err, userResults) => {
       if (err) throw new Error("Database error during email check");
