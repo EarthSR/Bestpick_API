@@ -2329,13 +2329,14 @@ app.put("/api/notifications/:id/read", verifyToken, (req, res) => {
 
   // log ค่า ID และ userId สำหรับการดีบัก
   console.log("Notification ID:", id);
-  console.log("User ID from Token:", userId);
+  console.log("User ID from Token (Post Owner):", userId);
 
-  // คำสั่ง SQL สำหรับการอัปเดตสถานะการอ่านของ Notification
+  // คำสั่ง SQL สำหรับการอัปเดตสถานะการอ่านของ Notification โดยตรวจสอบว่า userId คือเจ้าของโพสต์
   const updateReadStatusSql = `
-    UPDATE notifications
-    SET read_status = 1
-    WHERE id = ? AND user_id = ?;
+    UPDATE notifications n
+    JOIN posts p ON n.post_id = p.id
+    SET n.read_status = 1
+    WHERE n.id = ? AND p.user_id = ?;
   `;
 
   // เรียกคำสั่ง SQL
@@ -2348,9 +2349,9 @@ app.put("/api/notifications/:id/read", verifyToken, (req, res) => {
     
     // ตรวจสอบว่ามีการอัปเดตหรือไม่
     if (results.affectedRows === 0) {
-      // log กรณีไม่พบ notification หรือตรวจสอบว่าผู้ใช้ไม่ใช่เจ้าของ
-      console.warn(`Notification not found or not owned by user (ID: ${userId})`);
-      return res.status(404).json({ message: "Notification not found or you are not the owner" });
+      // log กรณีไม่พบ notification หรือตรวจสอบว่า user ไม่ใช่เจ้าของโพสต์
+      console.warn(`Notification not found or you are not the owner of the post (User ID: ${userId})`);
+      return res.status(404).json({ message: "Notification not found or you are not the owner of the post" });
     }
 
     // หากอัปเดตสำเร็จ
@@ -2358,7 +2359,6 @@ app.put("/api/notifications/:id/read", verifyToken, (req, res) => {
     res.json({ message: "Notification marked as read" });
   });
 });
-
 
 
 
