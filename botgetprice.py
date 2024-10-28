@@ -165,7 +165,7 @@ cosine_sim = joblib.load('cosine_similarity.pkl')
 
 def load_data_from_db():
     # สร้าง engine สำหรับ SQLAlchemy
-    engine = create_engine('mysql+mysqlconnector://root:1234@localhost/ReviewAPP')
+    engine = create_engine('mysql+mysqlconnector://bestpick_user:bestpick7890@localhost/reviewapp')
     
     # ดึงข้อมูลจากฐานข้อมูล
     query = "SELECT * FROM clean_new_view;"
@@ -250,7 +250,7 @@ def recommend_posts_for_user(user_id, alpha=0.7):
 
 
 # Configure your database URI
-app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+mysqlconnector://root:1234@localhost/ReviewAPP'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+mysqlconnector://bestpick_user:bestpick7890@localhost/reviewapp'
 
 # Initialize the SQLAlchemy object
 db = SQLAlchemy(app)
@@ -327,7 +327,7 @@ def censor_profanity(sentence):
 # ฟังก์ชันดึงข้อมูลจากฐานข้อมูลและเซ็นเซอร์
 def fetch_and_censor_from_db():
 
-    engine = create_engine('mysql+mysqlconnector://root:1234@localhost/ReviewAPP')
+    engine = create_engine('mysql+mysqlconnector://bestpick_user:bestpick7890@localhost/reviewapp')
 
     # ดึงข้อมูลจากฐานข้อมูล (ปรับ query ตามที่ต้องการ)
     query = "SELECT id, Title, content FROM posts WHERE status='active';"
@@ -350,7 +350,7 @@ if __name__ == "__main__":
 
 #แก้6
 
-@app.route('/recommend', methods=['POST'])
+@app.route('/ai/recommend', methods=['POST'])
 @verify_token
 def recommend():
     try:
@@ -417,7 +417,7 @@ def recommend():
 
 if __name__ == '__main__':
     try:
-        app.run(host='0.0.0.0', port=5000)
+        app.run(host='0.0.0.0', port=5005)
 
     finally:
         driver.quit()
