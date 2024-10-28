@@ -14,6 +14,8 @@ require("dotenv").config();
 const path = require("path");
 const JWT_SECRET = process.env.JWT_SECRET;
 const app = express();
+const { PythonShell } = require('python-shell');
+
 
 // Middleware
 app.use(bodyParser.json());
@@ -1038,7 +1040,7 @@ app.put("/api/posts/:id/status", verifyToken, (req, res) => {
 app.get("/api/posts/:id", verifyToken, (req, res) => {
   try {
     const { id } = req.params;
-    const userId = req.userId; // ดึง user_id จาก token ที่ผ่านการตรวจสอบแล้ว
+    const userId = req.userId;
 
     const queryPost = `
       SELECT p.*, u.username, u.picture, 
@@ -1050,45 +1052,42 @@ app.get("/api/posts/:id", verifyToken, (req, res) => {
       WHERE p.id = ?;
     `;
 
-    const queryComments = `
-      SELECT c.*, u.username, u.picture AS user_profile
-      FROM comments c
-      JOIN users u ON c.user_id = u.id
-      WHERE c.post_id = ?;
-    `;
-
-    pool.query(queryPost, [id, id, id, userId, id], (err, postResults) => {
+    pool.query(queryPost, [id, id, id, userId, id], async (err, postResults) => {
       if (err) {
         console.error("Database error during post retrieval:", err);
-        return res
-          .status(500)
-          .json({ error: "Internal server error during post retrieval" });
+        return res.status(500).json({ error: "Internal server error during post retrieval" });
       }
 
       if (postResults.length === 0) {
         return res.status(404).json({ error: "Post not found" });
       }
 
-      const post = postResults[0];
-      console.log("Post data fetched:", post); // เพิ่ม log เพื่อตรวจสอบข้อมูลโพสต์
+      let post = postResults[0];
+      post.photo_url = isValidJson(post.photo_url) ? JSON.parse(post.photo_url) : [post.photo_url];
+      post.video_url = isValidJson(post.video_url) ? JSON.parse(post.video_url) : [post.video_url];
+      post.is_liked = post.is_liked > 0;
 
-      post.photo_url = isValidJson(post.photo_url)
-        ? JSON.parse(post.photo_url)
-        : [post.photo_url];
-      post.video_url = isValidJson(post.video_url)
-        ? JSON.parse(post.video_url)
-        : [post.video_url];
-      post.is_liked = post.is_liked > 0; // แปลงค่า is_liked ให้เป็น boolean
+      try {
+        // ตรวจสอบและเซ็นเซอร์คำหยาบใน title และ content
+        post.Title = await censorContentPython(post.Title);
+        post.content = await censorContentPython(post.content);
+      } catch (censorError) {
+        console.error("Error during profanity censorship:", censorError);
+        return res.status(500).json({ error: "Profanity censorship failed" });
+      }
+
+      const queryComments = `
+        SELECT c.*, u.username, u.picture AS user_profile
+        FROM comments c
+        JOIN users u ON c.user_id = u.id
+        WHERE c.post_id = ?;
+      `;
 
       pool.query(queryComments, [id], (err, commentResults) => {
         if (err) {
           console.error("Database error during comments retrieval:", err);
-          return res
-            .status(500)
-            .json({ error: "Internal server error during comments retrieval" });
+          return res.status(500).json({ error: "Internal server error during comments retrieval" });
         }
-
-        console.log("Comment data fetched:", commentResults); // เพิ่ม log เพื่อตรวจสอบข้อมูลคอมเมนต์
 
         res.json({
           ...post,
@@ -1096,14 +1095,14 @@ app.get("/api/posts/:id", verifyToken, (req, res) => {
           productName: post.ProductName,
           comment_count: post.comment_count,
           update: post.updated_at,
-          is_liked: post.is_liked, // เพิ่มสถานะการไลค์ของผู้ใช้ในข้อมูลโพสต์
+          is_liked: post.is_liked,
           comments: commentResults.map((comment) => ({
             id: comment.id,
             user_id: comment.user_id,
             content: comment.comment_text,
             created_at: comment.created_at,
             username: comment.username,
-            user_profile: comment.user_profile ? comment.user_profile : null,
+            user_profile: comment.user_profile || null,
           })),
         });
       });
@@ -1113,6 +1112,9 @@ app.get("/api/posts/:id", verifyToken, (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 });
+
+
+
 
 
 
@@ -1439,13 +1441,13 @@ app.post("/api/posts/like/:id", verifyToken, (req, res) => {
 });
 
 // Serve static files (uploaded images and videos)
-app.use("/api/uploads", express.static(path.join(__dirname, "uploads")));
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+
+//แก้5 ยังไม่ได้เช็ค
 
 // Search API with grouped results by username, and include only the first photo_url
 app.get("/api/search", (req, res) => {
   const { query } = req.query;
-
-//แก้5
 
   if (!query) {
     return res.status(400).json({ error: "Search query is required" });
@@ -1477,7 +1479,7 @@ ORDER BY p.updated_at DESC;
   pool.query(
     searchSql,
     [searchValue, searchValue, searchValue],
-    (err, results) => {
+    async (err, results) => {
       if (err) {
         console.error("Database error during search:", err);
         return res.status(500).json({ error: "Internal server error" });
@@ -1488,11 +1490,15 @@ ORDER BY p.updated_at DESC;
       }
 
       // Group the results by username and aggregate their posts
-      const groupedResults = results.reduce((acc, post) => {
+      const groupedResults = results.reduce(async (acc, post) => {
         const username = post.username;
 
         // ตรวจสอบว่ามีโพสต์หรือไม่
         const hasPost = post.post_id !== null;
+
+        // เซ็นเซอร์คำหยาบใน title และ content_preview ของโพสต์
+        const censoredTitle = await censorContentPython(post.title);
+        const censoredContentPreview = await censorContentPython(post.content_preview);
 
         // Check if the username already exists in the accumulator (grouped results)
         const existingUser = acc.find((user) => user.username === username);
@@ -1502,8 +1508,8 @@ ORDER BY p.updated_at DESC;
           if (hasPost) {
             existingUser.posts.push({
               post_id: post.post_id,
-              title: post.title,
-              content_preview: post.content_preview,
+              title: censoredTitle,
+              content_preview: censoredContentPreview,
               photo_url: post.photo_url || "",
             });
           }
@@ -1518,7 +1524,7 @@ ORDER BY p.updated_at DESC;
                   {
                     post_id: post.post_id,
                     title: post.title,
-                    content_preview: post.content_preview,
+                    content_preview: post.censorContentPython,
                     photo_url: post.photo_url || "",
                   },
                 ]
@@ -1638,9 +1644,10 @@ app.get("/api/users/:userId/profile", verifyToken, (req, res) => {
   });
 });
 
+//แก้ 2 ยังไม่ได้เช็ค
 
 // ดูโปรไฟล์
-app.get("/api/users/:userId/view-profile", verifyToken, (req, res) => {
+app.get("/api/users/:userId/view-profile", verifyToken, async (req, res) => {
   const { userId } = req.params;
 
   const profileSql = `
@@ -1658,8 +1665,6 @@ app.get("/api/users/:userId/view-profile", verifyToken, (req, res) => {
     WHERE u.id = ?
     GROUP BY u.id;
   `;
-
-//แก้ 2 
 
   const postSql = `
     SELECT 
@@ -1689,7 +1694,7 @@ app.get("/api/users/:userId/view-profile", verifyToken, (req, res) => {
 
     const userProfile = profileResults[0];
 
-    pool.query(postSql, [userId], (postError, postResults) => {
+    pool.query(postSql, [userId], async (postError, postResults) => {
       if (postError) {
         console.error("Database error while fetching user posts:", postError);
         return res
@@ -1697,44 +1702,50 @@ app.get("/api/users/:userId/view-profile", verifyToken, (req, res) => {
           .json({ error: "Database error while fetching user posts" });
       }
 
-      // ตรวจสอบและแปลง photo_url และ video_url ให้เป็น JSON Array
-      const formattedPosts = postResults.map((post) => {
-        let photos = [];
-        let videos = [];
+      // Process each post with profanity checking
+      const formattedPosts = await Promise.all(
+        postResults.map(async (post) => {
+          let photos = [];
+          let videos = [];
 
-        // ตรวจสอบว่า `photo_url` เป็นอาร์เรย์อยู่แล้วหรือไม่
-        if (Array.isArray(post.photo_url)) {
-          photos = post.photo_url; // หากเป็นอาร์เรย์ ให้ใช้ข้อมูลตรง ๆ
-        } else if (typeof post.photo_url === "string") {
-          try {
-            photos = JSON.parse(post.photo_url); // กรณีที่เป็นสตริง JSON Array ให้แปลงเป็นอาร์เรย์
-          } catch (e) {
-            console.error("Error parsing photo_url:", e.message);
+          // Handle photo_url as JSON array
+          if (Array.isArray(post.photo_url)) {
+            photos = post.photo_url;
+          } else if (typeof post.photo_url === "string") {
+            try {
+              photos = JSON.parse(post.photo_url);
+            } catch (e) {
+              console.error("Error parsing photo_url:", e.message);
+            }
           }
-        }
 
-        // ตรวจสอบว่า `video_url` เป็นอาร์เรย์อยู่แล้วหรือไม่
-        if (Array.isArray(post.video_url)) {
-          videos = post.video_url; // หากเป็นอาร์เรย์ ให้ใช้ข้อมูลตรง ๆ
-        } else if (typeof post.video_url === "string") {
-          try {
-            videos = JSON.parse(post.video_url); // กรณีที่เป็นสตริง JSON Array ให้แปลงเป็นอาร์เรย์
-          } catch (e) {
-            console.error("Error parsing video_url:", e.message);
+          // Handle video_url as JSON array
+          if (Array.isArray(post.video_url)) {
+            videos = post.video_url;
+          } else if (typeof post.video_url === "string") {
+            try {
+              videos = JSON.parse(post.video_url);
+            } catch (e) {
+              console.error("Error parsing video_url:", e.message);
+            }
           }
-        }
 
-        return {
-          post_id: post.post_id,
-          title: post.title,
-          content: post.content,
-          created_at: post.updated_at,
-          like_count: post.like_count,
-          comment_count: post.comment_count,
-          photos, // ส่งกลับ photos ที่ถูกแปลงเป็น Array แล้ว
-          videos, // ส่งกลับ videos ที่ถูกแปลงเป็น Array แล้ว
-        };
-      });
+          // เซ็นเซอร์คำหยาบใน title และ content
+          const censoredTitle = await censorContentPython(post.title);
+          const censoredContent = await censorContentPython(post.content);
+
+          return {
+            post_id: post.post_id,
+            title: censoredTitle,
+            content: censoredContent,
+            created_at: post.updated_at,
+            like_count: post.like_count,
+            comment_count: post.comment_count,
+            photos, // formatted photos array
+            videos, // formatted videos array
+          };
+        })
+      );
 
       res.json({
         userId: userProfile.userId,
@@ -1750,6 +1761,7 @@ app.get("/api/users/:userId/view-profile", verifyToken, (req, res) => {
     });
   });
 });
+
 
 app.put(
   "/api/users/:userId/profile",
@@ -2087,9 +2099,10 @@ app.post("/api/posts/:postId/bookmark", verifyToken, (req, res) => {
   });
 });
 
+//แก้3 ยังไม่ได้เช็ค
 
-// API for fetching user's bookmarked posts
-app.get("/api/bookmarks", verifyToken, (req, res) => {
+// API for fetching user's bookmarked posts with profanity checking
+app.get("/api/bookmarks", verifyToken, async (req, res) => {
   const user_id = req.userId; // Get user_id from token
 
   // SQL query to fetch bookmarked posts with like and comment counts and follow status
@@ -2121,9 +2134,7 @@ ORDER BY b.created_at DESC;
 
   `;
 
-//แก้3
-
-  pool.query(fetchBookmarksSql, [user_id, user_id], (err, results) => {
+  pool.query(fetchBookmarksSql, [user_id, user_id], async (err, results) => {
     if (err) {
       console.error("Database error during fetching bookmarks:", err);
       return res.status(500).json({ error: "Error fetching bookmarks" });
@@ -2133,55 +2144,62 @@ ORDER BY b.created_at DESC;
       return res.status(404).json({ message: "No bookmarks found." });
     }
 
-    // Process photo_url and video_url as JSON arrays and format the response
-    const formattedBookmarks = results.map((post) => {
-      let photos = [];
-      let videos = [];
+    // Process each bookmark for censoring title and content
+    const formattedBookmarks = await Promise.all(
+      results.map(async (post) => {
+        let photos = [];
+        let videos = [];
 
-      // Handle photo_url (if it's a JSON string, parse it into an array)
-      if (typeof post.photo_url === "string") {
-        try {
-          photos = JSON.parse(post.photo_url);
-        } catch (e) {
-          console.error("Error parsing photo_url:", e.message);
+        // Handle photo_url (if it's a JSON string, parse it into an array)
+        if (typeof post.photo_url === "string") {
+          try {
+            photos = JSON.parse(post.photo_url);
+          } catch (e) {
+            console.error("Error parsing photo_url:", e.message);
+          }
+        } else if (Array.isArray(post.photo_url)) {
+          photos = post.photo_url;
         }
-      } else if (Array.isArray(post.photo_url)) {
-        photos = post.photo_url;
-      }
 
-      // Handle video_url (if it's a JSON string, parse it into an array)
-      if (typeof post.video_url === "string") {
-        try {
-          videos = JSON.parse(post.video_url);
-        } catch (e) {
-          console.error("Error parsing video_url:", e.message);
+        // Handle video_url (if it's a JSON string, parse it into an array)
+        if (typeof post.video_url === "string") {
+          try {
+            videos = JSON.parse(post.video_url);
+          } catch (e) {
+            console.error("Error parsing video_url:", e.message);
+          }
+        } else if (Array.isArray(post.video_url)) {
+          videos = post.video_url;
         }
-      } else if (Array.isArray(post.video_url)) {
-        videos = post.video_url;
-      }
 
-      return {
-        post_id: post.post_id,
-        title: post.title,
-        content: post.content,
-        created_at: post.updated_at,
-        like_count: post.like_count,
-        comment_count: post.comment_count,
-        photos, // formatted photos array
-        videos, // formatted videos array
-        author: {
-          user_id: post.user_id,
-          username: post.author_username,
-          profile_image: post.author_profile_image,
-        },
-        is_following: post.is_following === 1, // Convert 1 to true and 0 to false
-      };
-    });
+        // เซ็นเซอร์คำหยาบใน title และ content
+        const censoredTitle = await censorContentPython(post.title);
+        const censoredContent = await censorContentPython(post.content);
 
-    // Return the formatted bookmarks
+        return {
+          post_id: post.post_id,
+          title: censoredTitle,
+          content: censoredContent,
+          created_at: post.updated_at,
+          like_count: post.like_count,
+          comment_count: post.comment_count,
+          photos, // formatted photos array
+          videos, // formatted videos array
+          author: {
+            user_id: post.user_id,
+            username: post.author_username,
+            profile_image: post.author_profile_image,
+          },
+          is_following: post.is_following === 1, // Convert 1 to true and 0 to false
+        };
+      })
+    );
+
+    // Return the formatted bookmarks with profanity checking
     res.json({ bookmarks: formattedBookmarks });
   });
 });
+
 
 
 
@@ -2459,12 +2477,12 @@ app.get("/api/posts/:postId/bookmark/status", verifyToken, (req, res) => {
   });
 });
 
+//แก้4 ยังไม่ได้เช็ค
+
 
 // API to get posts from followed users
-app.get("/api/following/posts", verifyToken, (req, res) => {
+app.get("/api/following/posts", verifyToken, async (req, res) => {
   const userId = req.userId; // The logged-in user who is following others
-
-//แก้4
 
   const getFollowedPostsSql = `
     SELECT 
@@ -2487,40 +2505,47 @@ app.get("/api/following/posts", verifyToken, (req, res) => {
     ORDER BY p.updated_at DESC;
   `;
 
-  pool.query(getFollowedPostsSql, [userId, userId], (error, results) => {
+  pool.query(getFollowedPostsSql, [userId, userId], async (error, results) => {
     if (error) {
       return res.status(500).json({ error: "Database error during fetching followed posts." });
     }
 
-    // If there are no followed posts, return an empty array
     if (results.length === 0) {
       return res.status(200).json({ message: "No posts from followed users.", posts: [] });
     }
 
-    // Format the response and send it
-    const parsedResults = results.map((post) => {
-      const photoUrls = Array.isArray(post.photoUrl) ? post.photoUrl : []; // Fix: Use 'photoUrl' for consistency
-      const videoUrls = Array.isArray(post.videoUrl) ? post.videoUrl : []; // Fix: Use 'videoUrl' for consistency
+    // Process each post for censoring title and content
+    const parsedResults = await Promise.all(
+      results.map(async (post) => {
+        // เซ็นเซอร์คำหยาบใน title และ content
+        const censoredTitle = await censorContentPython(post.title);
+        const censoredContent = await censorContentPython(post.content);
 
-      return {
-        id: post.id,
-        userId: post.userId,
-        title: post.title,
-        content: post.content,
-        updated: post.updated, 
-        photo_url: photoUrls,
-        video_url: videoUrls,
-        userName: post.userName,
-        userProfileUrl: post.userProfileUrl,
-        likeCount: post.likeCount || 0,
-        commentCount: post.commentCount || 0,
-        isLiked: !!post.is_liked, // Convert to Boolean
-      };
-    });
+        // Convert photo and video URLs to arrays if needed
+        const photoUrls = Array.isArray(post.photoUrl) ? post.photoUrl : [];
+        const videoUrls = Array.isArray(post.videoUrl) ? post.videoUrl : [];
 
-    res.status(200).json({ posts: parsedResults }); // Return the parsed results
+        return {
+          id: post.id,
+          userId: post.userId,
+          title: censoredTitle,
+          content: censoredContent,
+          updated: post.updated, 
+          photo_url: photoUrls,
+          video_url: videoUrls,
+          userName: post.userName,
+          userProfileUrl: post.userProfileUrl,
+          likeCount: post.likeCount || 0,
+          commentCount: post.commentCount || 0,
+          isLiked: !!post.is_liked,
+        };
+      })
+    );
+
+    res.status(200).json({ posts: parsedResults });
   });
 });
+
 
 
 

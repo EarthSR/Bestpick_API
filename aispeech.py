@@ -1,50 +1,67 @@
-from flask import Flask, request, jsonify
+import sys
 import pickle
-import re
-
-app = Flask(__name__)
+from pythainlp import word_tokenize  
+from sqlalchemy import create_engine
+from sqlalchemy.sql import text
+import pandas as pd
+import pickle
 
 # โหลดโมเดลและ vectorizer จากไฟล์ .pkl
-MODEL_PATH = 'thai_profanity_model.pkl'
-with open(MODEL_PATH, 'rb') as model_file:
+with open('thai_profanity_model.pkl', 'rb') as model_file:
     model, vectorizer = pickle.load(model_file)
 
-# ฟังก์ชันสำหรับเซ็นเซอร์คำหยาบในประโยค
+# ฟังก์ชันสำหรับการเซ็นเซอร์คำหยาบในประโยค
 def censor_profanity(sentence):
-    words = sentence.split()
-    contains_profanity = False
+    """
+    ฟังก์ชันนี้รับประโยค (sentence) เป็น input 
+    และจะเซ็นเซอร์คำที่เป็นคำหยาบโดยแทนที่ด้วยเครื่องหมาย '*'
+    สำหรับคำที่ไม่หยาบจะคงค่าเดิมไว้
+    """
+    words = word_tokenize(sentence, engine="newmm")
+    censored_words = []
 
-    # ตรวจสอบคำหยาบ
     for word in words:
-        # แปลงคำเป็นเวกเตอร์ด้วย vectorizer
-        word_vector = vectorizer.transform([word])
+        try:
+            word_vectorized = vectorizer.transform([word])
+        except Exception:
+            censored_words.append(word)
+            continue
 
-        # ทำนายว่าคำเป็นคำหยาบหรือไม่
-        prediction = model.predict(word_vector)
-        
-        # หากมีคำหยาบ (ระดับ 1 หรือ 2) ให้เปลี่ยนค่า contains_profanity และหยุดการตรวจสอบเพิ่มเติม
-        if prediction[0] in [1, 2]:
-            contains_profanity = True
-            break
+        if word_vectorized.nnz == 0:
+            censored_words.append(word)
+            continue
 
-    # หากมีคำหยาบในประโยค เซ็นเซอร์ทั้งประโยค
-    if contains_profanity:
-        return '*' * len(sentence)  # เซ็นเซอร์ทั้งประโยคด้วย *
-    else:
-        return sentence  # คืนค่าเดิมถ้าไม่มีคำหยาบ
+        prediction = model.predict(word_vectorized)
 
-# สร้าง API สำหรับการเซ็นเซอร์คำหยาบ
-@app.route('/censor', methods=['POST'])
-def censor():
-    data = request.get_json()
-    sentence = data.get('sentence', '')
+        if prediction[0] == 1:
+            censored_words.append('*' * len(word))
+            print(f"Censored: {word} -> {'*' * len(word)}")  # เพิ่มการพิมพ์คำหยาบที่ถูกเซ็นเซอร์
+        else:
+            censored_words.append(word)
 
-    # เซ็นเซอร์คำหยาบในประโยค
-    censored_sentence = censor_profanity(sentence)
-    return jsonify({
-        'original': sentence,
-        'censored': censored_sentence
-    })
+    return ''.join(censored_words)
 
-if __name__ == '__main__':
-    app.run(debug=True)
+
+# ฟังก์ชันดึงข้อมูลจากฐานข้อมูลและเซ็นเซอร์
+def fetch_and_censor_from_db():
+
+    engine = create_engine('mysql+mysqlconnector://root:1234@localhost/ReviewAPP')
+
+    # ดึงข้อมูลจากฐานข้อมูล (ปรับ query ตามที่ต้องการ)
+    query = "SELECT id, Title, content FROM posts WHERE status='active';"
+    posts = pd.read_sql(query, con=engine)
+
+    # เซ็นเซอร์ title และ content ของแต่ละโพสต์
+    posts['censored_title'] = posts['Title'].apply(censor_profanity)
+    posts['censored_content'] = posts['content'].apply(censor_profanity)
+
+    # แสดงผลลัพธ์ที่เซ็นเซอร์แล้ว
+    for _, row in posts.iterrows():
+        print(f"Post ID: {row['id']}")
+        print(f"Censored Title: {row['censored_title']}")
+        print(f"Censored Content: {row['censored_content']}")
+        print("-" * 30)
+
+# เรียกใช้ฟังก์ชันโดยตรง
+if __name__ == "__main__":
+    fetch_and_censor_from_db()
