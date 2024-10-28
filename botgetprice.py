@@ -133,7 +133,7 @@ def search_and_scrape_banana_product(product_name, results):
         results['Banana'] = f"Error occurred during Banana IT scraping: {e}"
 
 # Flask route for searching multiple products
-@app.route('/search', methods=['GET'])
+@app.route('/ai/search', methods=['GET'])
 def search_product():
     product_name = request.args.get('productname')
     if not product_name:
