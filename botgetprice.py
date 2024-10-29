@@ -23,6 +23,7 @@ import random
 import sys
 import pickle
 from pythainlp import word_tokenize
+from functools import lru_cache
 
 
 
@@ -163,14 +164,11 @@ tfidf = joblib.load('tfidf_model.pkl')
 tfidf_matrix = joblib.load('tfidf_matrix.pkl')
 cosine_sim = joblib.load('cosine_similarity.pkl')
 
+@lru_cache(maxsize=128)
 def load_data_from_db():
-    # สร้าง engine สำหรับ SQLAlchemy
     engine = create_engine('mysql+mysqlconnector://bestpick_user:bestpick7890@localhost/reviewapp')
-    
-    # ดึงข้อมูลจากฐานข้อมูล
     query = "SELECT * FROM clean_new_view;"
-    data = pd.read_sql(query, con=engine)  
-    return data
+    return pd.read_sql(query, con=engine)
 
 # ฟังก์ชันสำหรับแนะนำโพสต์ตามเนื้อหาที่คล้ายกัน
 def content_based_recommendations(post_id, user_id):
@@ -409,10 +407,6 @@ def recommend():
         print("Error in recommend function:", e)
         # ส่งข้อความ error กลับไปในรูปแบบ JSON
         return jsonify({"error": "Internal Server Error"}), 500
-
-
-
-
 
 
 if __name__ == '__main__':
