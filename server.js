@@ -518,7 +518,7 @@ app.post("/api/login", async (req, res) => {
     pool.query(sql, [email], (err, results) => {
       if (err) throw new Error("Database error during login");
       if (results.length === 0) {
-        return res.status(404).json({ message: "No user found" });
+        return res.status(404).json({ message: "Email or Password is incorrect." });
       }
 
       const user = results[0];
@@ -561,7 +561,7 @@ app.post("/api/login", async (req, res) => {
           return res
             .status(401)
             .json({
-              message: `Email or Password is incorrect. You have ${remainingAttempts} attempts left.`,
+              message: `Email or Password is incorrect.`,
             });
         }
 
