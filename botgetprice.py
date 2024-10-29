@@ -383,15 +383,14 @@ def recommend():
         recommendations = []
         for post in sorted_posts:
             # เซ็นเซอร์คำหยาบใน title และ content
-            censored_title = censor_profanity(post['Title'])
-            censored_content = censor_profanity(post['content'])
+            
 
             # สร้างรายการแนะนำโพสต์
             recommendations.append({
                 "id": post['id'],
                 "userId": post['user_id'],
-                "title": censored_title,
-                "content": censored_content,
+                "title": post['Title'],
+                "content": post['content'],
                 "updated": post['updated_at'].astimezone(timezone.utc).replace(microsecond=0).isoformat() + 'Z',
                 "photo_url": json.loads(post.get('photo_url', '[]')),
                 "video_url": json.loads(post.get('video_url', '[]')),
