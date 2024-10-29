@@ -304,7 +304,7 @@ app.post("/api/register/set-password", async (req, res) => {
     const { email, password } = req.body;
     const hash = await bcrypt.hash(password, 10);
 
-    const sql = "INSERT INTO users (email, password, status, role, username, bio) VALUES (?, ?, 'active', 'user', '', '')";
+    const sql = "INSERT INTO users (email, password, status, role, username, bio) VALUES (?, ?, 'active', 'user', '', 'My bio....')";
     pool.query(sql, [email, hash], (err) => {
       if (err) throw new Error("Database error during registration");
 
