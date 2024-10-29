@@ -304,7 +304,7 @@ app.post("/api/register/set-password", async (req, res) => {
     const { email, password } = req.body;
     const hash = await bcrypt.hash(password, 10);
 
-    const sql = "INSERT INTO users (email, password, status, role, username) VALUES (?, ?, 'active', 'user', '')";
+    const sql = "INSERT INTO users (email, password, status, role, username, bio) VALUES (?, ?, 'active', 'user', '', '')";
     pool.query(sql, [email, hash], (err) => {
       if (err) throw new Error("Database error during registration");
 
@@ -514,35 +514,35 @@ app.post("/api/login", async (req, res) => {
     const ipAddress =
       req.headers["x-forwarded-for"] || req.connection.remoteAddress;
 
-    const sql = "SELECT * FROM users WHERE email = ? AND status = 'active'";
+    const sql = "SELECT * FROM users WHERE email = ?";
     pool.query(sql, [email], (err, results) => {
       if (err) throw new Error("Database error during login");
       if (results.length === 0) {
-        return res.status(404).json({ message: "Email or Password is incorrect." });
+        return res.status(404).json({ message: "No user found" });
       }
 
       const user = results[0];
 
+      // Check if the user's status is active
+      if (user.status !== 'active') {
+        return res.status(403).json({ message: "User is Suspended" });
+      }
+
+      if(user.password === null)
+
       // Check if the user signed up with Google
       if (user.google_id !== null) {
-        return res
-          .status(400)
-          .json({ message: "Please sign in using Google." });
+        return res.status(400).json({ message: "Please sign in using Google." });
       }
 
       // If the user has exceeded failed login attempts, block them for 5 minutes
       if (user.failed_attempts >= 5 && user.last_failed_attempt) {
         const now = Date.now();
-        const timeSinceLastAttempt =
-          now - new Date(user.last_failed_attempt).getTime();
-        if (timeSinceLastAttempt < 300000) {
-          // 5 minutes
-          return res
-            .status(429)
-            .json({
-              message:
-                "Too many failed login attempts. Try again in 5 minutes.",
-            });
+        const timeSinceLastAttempt = now - new Date(user.last_failed_attempt).getTime();
+        if (timeSinceLastAttempt < 300000) { // 5 minutes
+          return res.status(429).json({
+            message: "Too many failed login attempts. Try again in 5 minutes.",
+          });
         }
       }
 
@@ -551,31 +551,21 @@ app.post("/api/login", async (req, res) => {
         if (err) throw new Error("Password comparison error");
         if (!isMatch) {
           // Increment failed attempts and update last_failed_attempt
-          const updateFailSql =
-            "UPDATE users SET failed_attempts = failed_attempts + 1, last_failed_attempt = NOW() WHERE id = ?";
+          const updateFailSql = "UPDATE users SET failed_attempts = failed_attempts + 1, last_failed_attempt = NOW() WHERE id = ?";
           pool.query(updateFailSql, [user.id], (err) => {
             if (err) console.error("Error logging failed login attempt:", err);
           });
 
-          const remainingAttempts = 5 - (user.failed_attempts + 1); // +1 for current attempt
-          return res
-            .status(401)
-            .json({
-              message: `Email or Password is incorrect.`,
-            });
+          return res.status(401).json({ message: "Email or Password is incorrect." });
         }
 
         // Reset failed attempts after a successful login
-        const resetFailSql =
-          "UPDATE users SET failed_attempts = 0, last_login = NOW(), last_login_ip = ? WHERE id = ?";
+        const resetFailSql = "UPDATE users SET failed_attempts = 0, last_login = NOW(), last_login_ip = ? WHERE id = ?";
         pool.query(resetFailSql, [ipAddress, user.id], (err) => {
-          if (err)
-            throw new Error(
-              "Error resetting failed attempts or updating login time."
-            );
+          if (err) throw new Error("Error resetting failed attempts or updating login time.");
 
           // Generate JWT token
-          const token = jwt.sign({ id: user.id,role: user.role }, JWT_SECRET);
+          const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET);
 
           // Return successful login response with token and user data
           res.status(200).json({
@@ -598,6 +588,7 @@ app.post("/api/login", async (req, res) => {
     res.status(500).json({ error: "Internal server error" });
   }
 });
+
 
 // Set profile route (Profile setup or update)
 app.post("/api/set-profile", verifyToken, upload.single('picture'), (req, res) => {
