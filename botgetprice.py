@@ -58,7 +58,7 @@ def search_and_scrape_advice_product(product_name, results):
     try:
         search_url = f"https://www.advice.co.th/search?keyword={product_name.replace(' ', '%20')}"
         driver.get(search_url)
-        time.sleep(3)
+        time.sleep(2)
         soup = BeautifulSoup(driver.page_source, 'html.parser')
         
         # ปรับการดึงข้อมูลสินค้าให้เฉพาะเจาะจงมากขึ้น
