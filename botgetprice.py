@@ -23,7 +23,6 @@ import random
 import sys
 import pickle
 from pythainlp import word_tokenize
-from functools import lru_cache
 
 
 
@@ -164,7 +163,6 @@ tfidf = joblib.load('tfidf_model.pkl')
 tfidf_matrix = joblib.load('tfidf_matrix.pkl')
 cosine_sim = joblib.load('cosine_similarity.pkl')
 
-@lru_cache(maxsize=128)
 def load_data_from_db():
     engine = create_engine('mysql+mysqlconnector://bestpick_user:bestpick7890@localhost/reviewapp')
     query = "SELECT * FROM clean_new_view;"
