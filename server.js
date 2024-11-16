@@ -630,7 +630,6 @@ app.post("/api/set-profile", verifyToken, upload.single('picture'), (req, res) =
 });
 
 
-
 // Google Sign-In with soft delete handling
 app.post("/api/google-signin", async (req, res) => {
   try {
