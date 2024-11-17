@@ -30,40 +30,34 @@ app = Flask(__name__)
 
 # ฟังก์ชันตรวจสอบภาพโป๊
 def predict_image(image_path):
-    img = load_img(image_path, target_size=(150, 150))
-    img_array = img_to_array(img) / 255.0
-    img_array = np.expand_dims(img_array, axis=0)
+    try:
+        img = load_img(image_path, target_size=(150, 150))
+        img_array = img_to_array(img) / 255.0
+        img_array = np.expand_dims(img_array, axis=0)
 
-    prediction = model_image.predict(img_array)
-    return 'โป๊' if prediction[0][0] > 0.5 else 'ไม่โป๊'
-
-# คำหยาบและคำไม่หยาบ
-profanity_words_th = ["ไอ้สัส", "ไอ้สัตว์", "ไอควาย", "เหี้ย"]
-non_profanity_words_th = ["สัตว์", "ควาย", "หมา"]
+        prediction = model_image.predict(img_array)
+        return 'โป๊' if prediction[0][0] > 0.5 else 'ไม่โป๊'
+    except Exception as e:
+        return f"Error processing image: {e}"
 
 # ฟังก์ชันเซ็นเซอร์คำหยาบ
 def censor_profanity(sentence):
-    words = word_tokenize(sentence, engine="newmm")
-    censored_words = []
+    try:
+        words = word_tokenize(sentence, engine="newmm")
+        censored_words = []
 
-    for word in words:
-        if word in non_profanity_words_th:
-            censored_words.append(word)
-            continue
+        for word in words:
+            word_vectorized = vectorizer_profanity.transform([word])
+            prediction = model_profanity.predict(word_vectorized)
 
-        if word in profanity_words_th:
-            censored_words.append('*' * len(word))
-            continue
+            if prediction[0] == 1:  # คำหยาบ
+                censored_words.append('*' * len(word))
+            else:
+                censored_words.append(word)
 
-        word_vectorized = vectorizer_profanity.transform([word])
-        prediction = model_profanity.predict(word_vectorized)
-
-        if prediction[0] == 1:
-            censored_words.append('*' * len(word))
-        else:
-            censored_words.append(word)
-
-    return ''.join(censored_words)
+        return ''.join(censored_words)
+    except Exception as e:
+        return f"Error processing profanity: {e}"
 
 # สร้างโพสต์ใหม่
 @app.route('/ai/posts/create', methods=['POST'])
@@ -179,16 +173,7 @@ def update_post(id):
 
                 photo_urls.append(photo_path)
 
-        # อัปโหลดวิดีโอ
-        if 'videos' in request.files:
-            videos = request.files.getlist('videos')
-            for video in videos:
-                filename = secure_filename(video.filename)
-                video_path = os.path.join('uploads', filename)
-                video.save(video_path)
-                video_urls.append(video_path)
-
-        # อัปเดตข้อมูลในฐานข้อมูล
+        # อัปเดตในฐานข้อมูล
         photo_urls_json = json.dumps(photo_urls)
         video_urls_json = json.dumps(video_urls)
         query = """
@@ -198,9 +183,6 @@ def update_post(id):
         """
         cursor.execute(query, (censored_title, censored_content, product_name, category, video_urls_json, photo_urls_json, id))
         db.commit()
-
-        if cursor.rowcount == 0:
-            return jsonify({'error': 'Post update failed'}), 500
 
         return jsonify({
             'message': 'อัปเดตโพสต์สำเร็จ',
