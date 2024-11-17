@@ -630,6 +630,7 @@ app.post("/api/set-profile", verifyToken, upload.single('picture'), (req, res) =
 });
 
 
+
 // Google Sign-In with soft delete handling
 app.post("/api/google-signin", async (req, res) => {
   try {
@@ -1111,7 +1112,7 @@ app.get("/api/posts/:id", verifyToken, (req, res) => {
 
 
 
-
+/*
 // Create a Post
 app.post(
   "/api/posts/create",
@@ -1246,7 +1247,7 @@ app.put("/api/posts/:id", verifyToken, upload.fields([
       res.status(500).json({ error: "Internal server error" });
   }
 });
-
+*/
 
 
 
