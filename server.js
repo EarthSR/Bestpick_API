@@ -15,6 +15,8 @@ const path = require("path");
 const JWT_SECRET = process.env.JWT_SECRET;
 const app = express();
 const { PythonShell } = require('python-shell');
+const path = require('path');
+const { exec } = require('child_process');
 
 
 // Middleware
@@ -1109,32 +1111,29 @@ app.get("/api/posts/:id", verifyToken, (req, res) => {
 
 
 
-
-
-
-// ฟังก์ชันตรวจสอบคำหยาบ (เปลี่ยนเป็น Promise)
+// ฟังก์ชันตรวจสอบคำหยาบ (Promise-based)
 const checkProfanity = (text) => {
   return new Promise((resolve, reject) => {
-      exec(`python check_profanity.py "${text}"`, (error, stdout, stderr) => {
-          if (error) {
-              console.error(`Error: ${stderr}`);
-              reject(stderr);
-          }
-          resolve(stdout.trim());
-      });
+    exec(`python check_profanity.py "${text}"`, (error, stdout, stderr) => {
+      if (error) {
+        console.error(`Profanity Check Error: ${stderr}`);
+        return reject(error);
+      }
+      resolve(stdout.trim());
+    });
   });
 };
 
-// ฟังก์ชันตรวจสอบภาพโป๊ (เปลี่ยนเป็น Promise)
+// ฟังก์ชันตรวจสอบภาพโป๊ (Promise-based)
 const checkNudeImage = (imagePath) => {
   return new Promise((resolve, reject) => {
-      exec(`python check_nude_image.py "${imagePath}"`, (error, stdout, stderr) => {
-          if (error) {
-              console.error(`Error: ${stderr}`);
-              reject(stderr);
-          }
-          resolve(stdout.trim());
-      });
+    exec(`python check_nude_image.py "${imagePath}"`, (error, stdout, stderr) => {
+      if (error) {
+        console.error(`Nude Image Check Error: ${stderr}`);
+        return reject(error);
+      }
+      resolve(stdout.trim());
+    });
   });
 };
 
@@ -1143,199 +1142,183 @@ app.post(
   '/api/posts/create',
   verifyToken,
   upload.fields([
-      { name: 'photo', maxCount: 10 },
-      { name: 'video', maxCount: 10 },
+    { name: 'photo', maxCount: 10 },
+    { name: 'video', maxCount: 10 },
   ]),
   async (req, res) => {
-      try {
-          const { user_id, content, category, Title, ProductName } = req.body;
-          let photo_urls = [];
-          let video_urls = [];
+    try {
+      const { user_id, content, category, Title, ProductName } = req.body;
+      let photo_urls = [];
+      let video_urls = [];
 
-          // ตรวจสอบการสร้างโพสต์โดยผู้ใช้ที่ถูกต้อง
-          if (parseInt(req.userId) !== parseInt(user_id)) {
-              return res.status(403).json({
-                  error: 'You are not authorized to create a post for this user',
-              });
-          }
-
-          // เซ็นเซอร์คำหยาบ
-          const censoredTitle = await checkProfanity(Title);
-          const censoredContent = await checkProfanity(content);
-
-          // ตรวจสอบภาพโป๊ในรูปภาพที่อัปโหลด
-          if (req.files['photo']) {
-              for (const file of req.files['photo']) {
-                  const filePath = path.join(__dirname, file.path);
-                  const result = await checkNudeImage(filePath);
-                  if (result === 'โป๊') {
-                      fs.unlinkSync(filePath); // ลบไฟล์ที่ไม่เหมาะสม
-                      return res.status(400).json({
-                          error: 'รูปภาพไม่เหมาะสม กรุณาเปลี่ยนรูป',
-                      });
-                  }
-                  photo_urls.push(`/uploads/${file.filename}`);
-              }
-          }
-
-          // ดำเนินการกับวิดีโอ
-          if (req.files['video']) {
-              video_urls = req.files['video'].map((file) => `/uploads/${file.filename}`);
-          }
-
-          const photo_urls_json = JSON.stringify(photo_urls);
-          const video_urls_json = JSON.stringify(video_urls);
-
-          const query =
-              'INSERT INTO posts (user_id, content, video_url, photo_url, CategoryID, Title, ProductName) VALUES (?, ?, ?, ?, ?, ?, ?)';
-          pool.query(
-              query,
-              [
-                  user_id,
-                  censoredContent,
-                  video_urls_json,
-                  photo_urls_json,
-                  category,
-                  censoredTitle,
-                  ProductName,
-              ],
-              (err, results) => {
-                  if (err) {
-                      console.error('Database error during post creation:', err);
-                      return res
-                          .status(500)
-                          .json({ error: 'Database error during post creation' });
-                  }
-                  res.status(201).json({
-                      post_id: results.insertId,
-                      user_id,
-                      content: censoredContent,
-                      category,
-                      Title: censoredTitle,
-                      ProductName,
-                      video_urls,
-                      photo_urls,
-                  });
-              }
-          );
-      } catch (error) {
-          console.error('Internal server error:', error.message);
-          res.status(500).json({ error: 'Internal server error' });
+      // ตรวจสอบการสร้างโพสต์โดยผู้ใช้ที่ถูกต้อง
+      if (parseInt(req.userId) !== parseInt(user_id)) {
+        return res.status(403).json({
+          error: 'You are not authorized to create a post for this user',
+        });
       }
+
+      // ตรวจสอบคำหยาบ
+      const censoredTitle = await checkProfanity(Title);
+      const censoredContent = await checkProfanity(content);
+
+      // ตรวจสอบภาพโป๊ในรูปภาพที่อัปโหลด
+      if (req.files['photo']) {
+        for (const file of req.files['photo']) {
+          const filePath = path.join(__dirname, file.path);
+          const result = await checkNudeImage(filePath);
+
+          if (result === 'โป๊') {
+            fs.unlinkSync(filePath); // ลบไฟล์ที่ไม่เหมาะสม
+            return res.status(400).json({
+              error: 'รูปภาพไม่เหมาะสม กรุณาเปลี่ยนรูป',
+            });
+          }
+
+          photo_urls.push(`/uploads/${file.filename}`);
+        }
+      }
+
+      // ดำเนินการกับวิดีโอ
+      if (req.files['video']) {
+        video_urls = req.files['video'].map((file) => `/uploads/${file.filename}`);
+      }
+
+      const photo_urls_json = JSON.stringify(photo_urls);
+      const video_urls_json = JSON.stringify(video_urls);
+
+      const query =
+        'INSERT INTO posts (user_id, content, video_url, photo_url, CategoryID, Title, ProductName) VALUES (?, ?, ?, ?, ?, ?, ?)';
+      pool.query(
+        query,
+        [
+          user_id,
+          censoredContent,
+          video_urls_json,
+          photo_urls_json,
+          category,
+          censoredTitle,
+          ProductName,
+        ],
+        (err, results) => {
+          if (err) {
+            console.error('Database error during post creation:', err);
+            return res
+              .status(500)
+              .json({ error: 'Database error during post creation' });
+          }
+          res.status(201).json({
+            post_id: results.insertId,
+            user_id,
+            content: censoredContent,
+            category,
+            Title: censoredTitle,
+            ProductName,
+            video_urls,
+            photo_urls,
+          });
+        }
+      );
+    } catch (error) {
+      console.error('Internal server error:', error.message);
+      res.status(500).json({ error: 'Internal server error' });
+    }
   }
 );
 
 // API สำหรับอัปเดตโพสต์
 app.put(
-    '/api/posts/:id',
-    verifyToken,
-    upload.fields([
-        { name: 'photo', maxCount: 10 },
-        { name: 'video', maxCount: 10 },
-    ]),
-    (req, res) => {
-        try {
-            const { id } = req.params;
-            const {
-                Title,
-                content,
-                ProductName,
-                CategoryID,
-                user_id,
-                existing_photos = [],
-                existing_videos = [],
-            } = req.body;
+  '/api/posts/:id',
+  verifyToken,
+  upload.fields([
+    { name: 'photo', maxCount: 10 },
+    { name: 'video', maxCount: 10 },
+  ]),
+  async (req, res) => {
+    try {
+      const { id } = req.params;
+      const {
+        Title,
+        content,
+        ProductName,
+        CategoryID,
+        user_id,
+        existing_photos = [],
+        existing_videos = [],
+      } = req.body;
 
-            let photo_urls = Array.isArray(existing_photos) ? [...existing_photos] : [];
-            let video_urls = Array.isArray(existing_videos) ? [...existing_videos] : [];
+      let photo_urls = Array.isArray(existing_photos) ? [...existing_photos] : [];
+      let video_urls = Array.isArray(existing_videos) ? [...existing_videos] : [];
 
-            if (parseInt(req.userId) !== parseInt(user_id)) {
-                return res.status(403).json({ error: 'You are not authorized to update this post' });
-            }
+      // ตรวจสอบว่าโพสต์มีอยู่และผู้ใช้เป็นเจ้าของ
+      const postQuery = 'SELECT user_id FROM posts WHERE id = ?';
+      const [postResult] = await pool.promise().query(postQuery, [id]);
 
-            checkProfanity(Title, (censoredTitle) => {
-                checkProfanity(content, (censoredContent) => {
-                    if (req.files['photo']) {
-                        req.files['photo'].forEach((file) => {
-                            const filePath = path.join(__dirname, file.path);
-                            checkNudeImage(filePath, (result) => {
-                                if (result === 'โป๊') {
-                                    fs.unlinkSync(filePath); // ลบไฟล์ที่ไม่เหมาะสม
-                                    return res.status(400).json({
-                                        error: 'รูปภาพไม่เหมาะสม กรุณาเปลี่ยนรูป',
-                                    });
-                                }
-                                photo_urls.push(`/uploads/${file.filename}`);
-                            });
-                        });
-                    }
+      if (!postResult.length || parseInt(postResult[0].user_id) !== parseInt(user_id)) {
+        return res.status(403).json({ error: 'You are not authorized to update this post' });
+      }
 
-                    if (req.files['video']) {
-                        const new_videos = req.files['video'].map(
-                            (file) => `/uploads/${file.filename}`
-                        );
-                        video_urls = [...video_urls, ...new_videos];
-                    }
+      // เซ็นเซอร์คำหยาบ
+      const censoredTitle = await checkProfanity(Title);
+      const censoredContent = await checkProfanity(content);
 
-                    const photo_urls_json = JSON.stringify(photo_urls);
-                    const video_urls_json = JSON.stringify(video_urls);
+      // ตรวจสอบภาพโป๊ในรูปภาพที่อัปโหลด
+      if (req.files['photo']) {
+        for (const file of req.files['photo']) {
+          const filePath = path.join(__dirname, file.path);
+          const result = await checkNudeImage(filePath);
 
-                    const query = `
-                        UPDATE posts
-                        SET Title = ?, content = ?, ProductName = ?, CategoryID = ?, video_url = ?, photo_url = ?, updated_at = NOW()
-                        WHERE id = ? AND user_id = ?
-                    `;
-                    pool.query(
-                        query,
-                        [
-                            censoredTitle,
-                            censoredContent,
-                            ProductName,
-                            CategoryID === 'NULL' ? null : CategoryID,
-                            video_urls_json,
-                            photo_urls_json,
-                            id,
-                            user_id,
-                        ],
-                        (err, results) => {
-                            if (err) {
-                                console.error(
-                                    'Database error during post update:',
-                                    err.message
-                                );
-                                return res
-                                    .status(500)
-                                    .json({ error: 'Database error during post update' });
-                            }
-
-                            if (results.affectedRows === 0) {
-                                return res
-                                    .status(404)
-                                    .json({ error: 'Post not found or you are not the owner' });
-                            }
-
-                            res.json({
-                                post_id: id,
-                                Title: censoredTitle,
-                                content: censoredContent,
-                                ProductName,
-                                CategoryID: CategoryID === 'NULL' ? null : CategoryID,
-                                video_urls,
-                                photo_urls,
-                            });
-                        }
-                    );
-                });
+          if (result === 'โป๊') {
+            fs.unlinkSync(filePath); // ลบไฟล์ที่ไม่เหมาะสม
+            return res.status(400).json({
+              error: 'รูปภาพไม่เหมาะสม กรุณาเปลี่ยนรูป',
             });
-        } catch (error) {
-            console.error('Internal server error:', error.message);
-            res.status(500).json({ error: 'Internal server error' });
+          }
+
+          photo_urls.push(`/uploads/${file.filename}`);
         }
+      }
+
+      // ดำเนินการกับวิดีโอ
+      if (req.files['video']) {
+        const new_videos = req.files['video'].map((file) => `/uploads/${file.filename}`);
+        video_urls = [...video_urls, ...new_videos];
+      }
+
+      const photo_urls_json = JSON.stringify(photo_urls);
+      const video_urls_json = JSON.stringify(video_urls);
+
+      const updateQuery = `
+        UPDATE posts
+        SET Title = ?, content = ?, ProductName = ?, CategoryID = ?, video_url = ?, photo_url = ?, updated_at = NOW()
+        WHERE id = ? AND user_id = ?
+      `;
+      await pool.promise().query(updateQuery, [
+        censoredTitle,
+        censoredContent,
+        ProductName,
+        CategoryID === 'NULL' ? null : CategoryID,
+        video_urls_json,
+        photo_urls_json,
+        id,
+        user_id,
+      ]);
+
+      res.json({
+        post_id: id,
+        Title: censoredTitle,
+        content: censoredContent,
+        ProductName,
+        CategoryID: CategoryID === 'NULL' ? null : CategoryID,
+        video_urls,
+        photo_urls,
+      });
+    } catch (error) {
+      console.error('Internal server error:', error.message);
+      res.status(500).json({ error: 'Internal server error' });
     }
+  }
 );
-
-
-
 
 
 // Delete a Post
