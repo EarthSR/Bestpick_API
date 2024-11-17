@@ -1112,7 +1112,7 @@ app.get("/api/posts/:id", verifyToken, (req, res) => {
 
 
 
-/*
+
 // Create a Post
 app.post(
   "/api/posts/create",
@@ -1247,7 +1247,7 @@ app.put("/api/posts/:id", verifyToken, upload.fields([
       res.status(500).json({ error: "Internal server error" });
   }
 });
-*/
+
 
 
 

@@ -352,7 +352,7 @@ def recommend():
         return jsonify({"error": "Internal Server Error"}), 500
     
 
-
+'''
 # โหลดโมเดลตรวจสอบภาพโป๊
 model_image = tf.keras.models.load_model('nude_classifier_model.h5')
 
@@ -540,7 +540,7 @@ def update_post(id):
     except Exception as e:
         db.rollback()
         return jsonify({'error': str(e)}), 500
-
+'''
 
 if __name__ == '__main__':
     try:
