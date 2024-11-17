@@ -13,7 +13,7 @@ import json
 model_image = tf.keras.models.load_model('nude_classifier_model.h5')
 
 # โหลดโมเดลกรองคำหยาบ
-with open('thai_profanity_model.pkl', 'rb') as model_file:
+with open('profanity_model.pkl', 'rb') as model_file:
     model_profanity, vectorizer_profanity = pickle.load(model_file)
 
 # การตั้งค่าฐานข้อมูล
