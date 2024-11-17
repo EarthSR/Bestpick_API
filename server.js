@@ -1111,29 +1111,31 @@ app.get("/api/posts/:id", verifyToken, (req, res) => {
 
 
 
+// Profanity Check Function
 const checkProfanity = (text) => {
   return new Promise((resolve, reject) => {
-      exec(`python check_profanity.py "${text}"`, (error, stdout, stderr) => {
-          if (error) {
-              console.error(`Profanity AI Error: ${stderr}`);
-              return reject(`AI Error: ${stderr}`);
-          }
-          console.log(`Profanity AI Result: ${stdout.trim()}`);
-          resolve(stdout.trim());
-      });
+    exec(`python check_profanity.py "${text}"`, (error, stdout, stderr) => {
+      if (error) {
+        console.error(`Profanity Check Error: ${stderr}`);
+        return reject(error);
+      }
+      console.log(`Profanity Check Result for "${text}": ${stdout.trim()}`);
+      resolve(stdout.trim());
+    });
   });
 };
 
+// Nude Image Detection Function
 const checkNudeImage = (imagePath) => {
   return new Promise((resolve, reject) => {
-      exec(`python check_nude_image.py "${imagePath}"`, (error, stdout, stderr) => {
-          if (error) {
-              console.error(`Nude Image AI Error: ${stderr}`);
-              return reject(`AI Error: ${stderr}`);
-          }
-          console.log(`Nude Image AI Result: ${stdout.trim()}`);
-          resolve(stdout.trim());
-      });
+    exec(`python check_nude_image.py "${imagePath}"`, (error, stdout, stderr) => {
+      if (error) {
+        console.error(`Nude Image Check Error: ${stderr}`);
+        return reject(error);
+      }
+      console.log(`Nude Image Check Result for "${imagePath}": ${stdout.trim()}`);
+      resolve(stdout.trim());
+    });
   });
 };
 
@@ -1215,6 +1217,7 @@ app.post(
       }
   }
 );
+
 
 // Update Post API
 app.put(
