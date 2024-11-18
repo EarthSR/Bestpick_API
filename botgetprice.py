@@ -399,7 +399,7 @@ def censor_profanity(sentence):
     return censored_sentence, has_profanity
 
 
-@app.route('/api/posts/create', methods=['POST'])
+@app.route('/ai/posts/create', methods=['POST'])
 def create_post():
     try:
         user_id = request.form.get('user_id')
@@ -441,7 +441,7 @@ def create_post():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route('/api/posts/<int:id>', methods=['PUT'])
+@app.route('/ai/posts/<int:id>', methods=['PUT'])
 def update_post(id):
     try:
         user_id = request.form.get('user_id')
