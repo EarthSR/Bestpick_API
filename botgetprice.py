@@ -396,6 +396,7 @@ def censor_profanity(sentence):
 
 # Endpoint สำหรับสร้างโพสต์
 @app.route('/ai/posts/create', methods=['POST'])
+@verify_token
 def create_post():
     try:
         user_id = request.form.get('user_id')
@@ -406,7 +407,14 @@ def create_post():
         photos = request.files.getlist('photo')
         videos = request.files.getlist('video')
 
-        print(f"Request Data: user_id={user_id}, content={content}, category={category}, title={title}, product_name={product_name}")
+        # Debugging
+        print(f"Request Form: {request.form}")
+        print(f"Photos: {photos}")
+        print(f"Videos: {videos}")
+
+        # ตรวจสอบสิทธิ์ผู้ใช้
+        if request.user_id != int(user_id):
+            return jsonify({"error": "You are not authorized to create this post"}), 403
 
         # ตรวจสอบคำหยาบและเซ็นเซอร์
         censored_content, has_profanity = censor_profanity(content)
@@ -414,16 +422,18 @@ def create_post():
             return jsonify({"error": "โพสต์มีคำหยาบ กรุณาแก้ไขเนื้อหา"}), 400
 
         # ตรวจสอบภาพโป๊
+        photo_urls = []
         for photo in photos:
-            photo_path = os.path.join(UPLOAD_FOLDER, photo.filename)
+            photo_path = os.path.join(UPLOAD_FOLDER, secure_filename(photo.filename))
             photo.save(photo_path)
+            print(f"Photo saved at: {photo_path}")
             if predict_image(photo_path):
                 os.remove(photo_path)
                 return jsonify({"error": "พบภาพโป๊ กรุณาลบภาพดังกล่าวออกจากโพสต์"}), 400
+            photo_urls.append(f'/uploads/{secure_filename(photo.filename)}')
 
-        # บันทึก URL ของรูปภาพและวิดีโอ
-        photo_urls = [f'/uploads/{photo.filename}' for photo in photos]
-        video_urls = [f'/uploads/{video.filename}' for video in videos]
+        # บันทึก URL ของวิดีโอ
+        video_urls = [f'/uploads/{secure_filename(video.filename)}' for video in videos]
 
         # Mock response (เก็บข้อมูลในฐานข้อมูล)
         return jsonify({
@@ -498,7 +508,7 @@ def update_post(id):
         print(f"Error in update_post: {e}")
         return jsonify({"error": str(e)}), 500
     
-    
+
 
 if __name__ == '__main__':
     try:
