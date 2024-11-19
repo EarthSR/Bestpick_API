@@ -292,64 +292,155 @@ sys.stdout.reconfigure(encoding='utf-8')
 
 #แก้6
 
-@app.route('/ai/recommend', methods=['POST'])
-@verify_token
-def recommend():
+
+'''
+from flask import Flask, request, jsonify
+from werkzeug.utils import secure_filename
+from flask_cors import CORS
+import os
+import pymysql
+import json
+from profanityAI import censor_profanity  # AI สำหรับเซ็นเซอร์คำหยาบ
+from imageAI import predict_image  # AI สำหรับตรวจจับภาพโป๊
+
+app = Flask(__name__)
+CORS(app)
+
+UPLOAD_FOLDER = './uploads'
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+# เชื่อมต่อฐานข้อมูล
+connection = pymysql.connect(
+    host='localhost',
+    user='root',
+    password='1234',
+    database='reviewapp',
+    charset='utf8mb4',
+    cursorclass=pymysql.cursors.DictCursor
+)
+
+
+# ฟังก์ชันสำหรับเซ็นเซอร์คำหยาบในหลายฟิลด์
+def apply_profanity_filter(*fields):
+    return [censor_profanity(field) for field in fields]
+
+
+# ฟังก์ชันสำหรับสร้างโพสต์
+@app.route('/ai/posts/create', methods=['POST'])
+def create_post():
     try:
-        user_id = request.user_id
-        post_scores = recommend_posts_for_user(user_id)
+        user_id = request.form.get('user_id')
+        content = request.form.get('content')
+        category = request.form.get('category')
+        title = request.form.get('Title')
+        product_name = request.form.get('ProductName')
+        photos = request.files.getlist('photo')
+        videos = request.files.getlist('video')
 
-        if not post_scores:
-            return jsonify({"error": "No recommendations found"}), 404
+        # เซ็นเซอร์คำหยาบในเนื้อหา
+        censored_content, censored_title, censored_product_name = apply_profanity_filter(
+            content, title, product_name)
 
-        # เตรียม post_ids จาก post_scores
-        post_ids = [post_id for post_id, _ in post_scores]
+        # ตรวจสอบภาพโป๊
+        photo_urls = []
+        for photo in photos:
+            photo_path = os.path.join(UPLOAD_FOLDER, secure_filename(photo.filename))
+            photo.save(photo_path)
+            if predict_image(photo_path):  # ตรวจสอบว่าภาพเป็นโป๊หรือไม่
+                os.remove(photo_path)  # ลบภาพที่ไม่เหมาะสม
+                return jsonify({"error": "พบภาพโป๊ กรุณาลบภาพดังกล่าวออกจากโพสต์"}), 400
+            photo_urls.append(f'/uploads/{secure_filename(photo.filename)}')
 
-        # ตรวจสอบว่า post_ids ถูกต้อง
-        print("Post IDs for database query:", post_ids)
+        # เก็บ URL ของวิดีโอ
+        video_urls = [f'/uploads/{secure_filename(video.filename)}' for video in videos]
 
-        placeholders = ', '.join([f':id_{i}' for i in range(len(post_ids))])
-        query = text(f"""
-            SELECT posts.*, users.username, users.picture, 
-                   (SELECT COUNT(*) FROM likes WHERE post_id = posts.id AND user_id = :user_id) AS is_liked
-            FROM posts 
-            JOIN users ON posts.user_id = users.id
-            WHERE posts.status = 'active' AND posts.id IN ({placeholders})
-        """)
+        # บันทึกลงฐานข้อมูล
+        with connection.cursor() as cursor:
+            query = """
+                INSERT INTO posts (user_id, content, video_url, photo_url, CategoryID, Title, ProductName)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """
+            cursor.execute(query, (user_id, censored_content, json.dumps(video_urls),
+                                   json.dumps(photo_urls), category, censored_title, censored_product_name))
+            connection.commit()
 
-        params = {'user_id': user_id, **{f'id_{i}': post_id for i, post_id in enumerate(post_ids)}}
-        result = db.session.execute(query, params).fetchall()
-        posts = [row._mapping for row in result]
-
-        # ใช้ post_scores เพื่อจัดเรียงโพสต์ตามคะแนน
-        sorted_posts = sorted(posts, key=lambda x: post_scores[post_ids.index(x['id'])][1], reverse=True)
-
-        recommendations = []
-        for post in sorted_posts:
-            # เซ็นเซอร์คำหยาบใน title และ content
-            
-
-            # สร้างรายการแนะนำโพสต์
-            recommendations.append({
-                "id": post['id'],
-                "userId": post['user_id'],
-                "title": post['Title'],
-                "content": post['content'],
-                "updated": post['updated_at'].astimezone(timezone.utc).replace(microsecond=0).isoformat() + 'Z',
-                "photo_url": json.loads(post.get('photo_url', '[]')),
-                "video_url": json.loads(post.get('video_url', '[]')),
-                "userName": post['username'],
-                "userProfileUrl": post['picture'],
-                "is_liked": post['is_liked'] > 0
-            })
-
-        return jsonify(recommendations)
+        return jsonify({
+            "message": "โพสต์ถูกสร้างสำเร็จ",
+            "user_id": user_id,
+            "content": censored_content,
+            "category": category,
+            "Title": censored_title,
+            "ProductName": censored_product_name,
+            "photo_urls": photo_urls,
+            "video_urls": video_urls
+        }), 201
 
     except Exception as e:
-        # พิมพ์ข้อความ error ใน Console เพื่อให้คุณเห็นรายละเอียด
-        print("Error in recommend function:", e)
-        # ส่งข้อความ error กลับไปในรูปแบบ JSON
-        return jsonify({"error": "Internal Server Error"}), 500
+        print(f"Error in create_post: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+# ฟังก์ชันสำหรับอัปเดตโพสต์
+@app.route('/ai/posts/<int:id>', methods=['PUT'])
+def update_post(id):
+    try:
+        user_id = request.form.get('user_id')
+        content = request.form.get('content')
+        category = request.form.get('category')
+        title = request.form.get('Title')
+        product_name = request.form.get('ProductName')
+        photos = request.files.getlist('photo')
+        videos = request.files.getlist('video')
+
+        # เซ็นเซอร์คำหยาบในเนื้อหา
+        censored_content, censored_title, censored_product_name = apply_profanity_filter(
+            content, title, product_name)
+
+        # ตรวจสอบภาพโป๊
+        photo_urls = []
+        for photo in photos:
+            photo_path = os.path.join(UPLOAD_FOLDER, secure_filename(photo.filename))
+            photo.save(photo_path)
+            if predict_image(photo_path):  # ตรวจสอบว่าภาพเป็นโป๊หรือไม่
+                os.remove(photo_path)  # ลบภาพที่ไม่เหมาะสม
+                return jsonify({"error": "พบภาพโป๊ กรุณาลบภาพดังกล่าวออกจากโพสต์"}), 400
+            photo_urls.append(f'/uploads/{secure_filename(photo.filename)}')
+
+        # เก็บ URL ของวิดีโอ
+        video_urls = [f'/uploads/{secure_filename(video.filename)}' for video in videos]
+
+        # อัปเดตข้อมูลในฐานข้อมูล
+        with connection.cursor() as cursor:
+            query = """
+                UPDATE posts
+                SET content = %s, Title = %s, ProductName = %s, CategoryID = %s, video_url = %s, photo_url = %s, updated_at = NOW()
+                WHERE id = %s AND user_id = %s
+            """
+            cursor.execute(query, (censored_content, censored_title, censored_product_name, category,
+                                   json.dumps(video_urls), json.dumps(photo_urls), id, user_id))
+            connection.commit()
+
+        return jsonify({
+            "message": "โพสต์ถูกอัปเดตสำเร็จ",
+            "post_id": id,
+            "user_id": user_id,
+            "content": censored_content,
+            "category": category,
+            "Title": censored_title,
+            "ProductName": censored_product_name,
+            "photo_urls": photo_urls,
+            "video_urls": video_urls
+        }), 200
+
+    except Exception as e:
+        print(f"Error in update_post: {e}")
+        return jsonify({"error": str(e)}), 500
+
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5005)
+
+'''
     
 
 if __name__ == '__main__':
