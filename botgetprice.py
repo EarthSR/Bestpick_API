@@ -353,128 +353,103 @@ def recommend():
         return jsonify({"error": "Internal Server Error"}), 500
     
 
-# Create a Post
+# โหลดโมเดล TensorFlow สำหรับตรวจสอบภาพโป๊
+model_image = tf.keras.models.load_model('nude_classifier_model.h5')
+
+# โหลดโมเดลสำหรับตรวจสอบคำหยาบ
+with open('profanity_model.pkl', 'rb') as model_file:
+    model_profanity, vectorizer_profanity = pickle.load(model_file)
+
+app = Flask(__name__)
+CORS(app)  # เปิดใช้งาน CORS
+UPLOAD_FOLDER = '/var/www/html/bestpick/nodejs/Bestpick_API/uploads'
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+# ฟังก์ชันตรวจสอบภาพโป๊
+def predict_image(image_path):
+    try:
+        img = load_img(image_path, target_size=(128, 128))  # เปลี่ยนขนาดเป็น 128x128
+        img_array = img_to_array(img) / 255.0              # แปลงภาพเป็น array และ normalize
+        img_array = np.expand_dims(img_array, axis=0)      # เพิ่มมิติที่ 0 (batch size)
+        prediction = model_image.predict(img_array)       # ส่งเข้าโมเดล
+        return prediction[0][0] > 0.5  # True = "โป๊", False = "ไม่โป๊"
+    except Exception as e:
+        print(f"Error in predict_image: {e}")
+        return False
+
+# ฟังก์ชันเซ็นเซอร์คำหยาบ
+def censor_profanity(sentence):
+    try:
+        words = word_tokenize(sentence, engine="newmm")
+        censored_words = [
+            '*' * len(word) if model_profanity.predict(vectorizer_profanity.transform([word]))[0] == 1 else word
+            for word in words
+        ]
+        censored_sentence = ''.join(censored_words)
+        has_profanity = any(
+            model_profanity.predict(vectorizer_profanity.transform([word]))[0] == 1 for word in words
+        )
+        return censored_sentence, has_profanity
+    except Exception as e:
+        print(f"Error in censor_profanity: {e}")
+        return sentence, False
+
+# Endpoint สำหรับสร้างโพสต์
 @app.route('/ai/posts/create', methods=['POST'])
 @verify_token
 def create_post():
     try:
-        user_id = int(request.form.get('user_id'))
+        user_id = request.form.get('user_id')
         content = request.form.get('content')
         category = request.form.get('category')
         title = request.form.get('Title')
         product_name = request.form.get('ProductName')
+        photos = request.files.getlist('photo')
+        videos = request.files.getlist('video')
 
-        if request.user_id != user_id:
-            return jsonify({'error': 'You are not authorized to create a post for this user'}), 403
+        # Debugging
+        print(f"Request Form: {request.form}")
+        print(f"Photos: {photos}")
+        print(f"Videos: {videos}")
 
-        # Handle photo and video uploads
+        # ตรวจสอบสิทธิ์ผู้ใช้
+        if request.user_id != int(user_id):
+            return jsonify({"error": "You are not authorized to create this post"}), 403
+
+        # ตรวจสอบคำหยาบและเซ็นเซอร์
+        censored_content, has_profanity = censor_profanity(content)
+        if has_profanity:
+            return jsonify({"error": "โพสต์มีคำหยาบ กรุณาแก้ไขเนื้อหา"}), 400
+
+        # ตรวจสอบภาพโป๊
         photo_urls = []
-        video_urls = []
+        for photo in photos:
+            photo_path = os.path.join(UPLOAD_FOLDER, secure_filename(photo.filename))
+            photo.save(photo_path)
+            print(f"Photo saved at: {photo_path}")
+            if predict_image(photo_path):
+                os.remove(photo_path)
+                return jsonify({"error": "พบภาพโป๊ กรุณาลบภาพดังกล่าวออกจากโพสต์"}), 400
+            photo_urls.append(f'/uploads/{secure_filename(photo.filename)}')
 
-        if 'photo' in request.files:
-            for file in request.files.getlist('photo'):
-                filename = secure_filename(file.filename)
-                filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-                file.save(filepath)
-                photo_urls.append(f'/uploads/{filename}')
+        # บันทึก URL ของวิดีโอ
+        video_urls = [f'/uploads/{secure_filename(video.filename)}' for video in videos]
 
-        if 'video' in request.files:
-            for file in request.files.getlist('video'):
-                filename = secure_filename(file.filename)
-                filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-                file.save(filepath)
-                video_urls.append(f'/uploads/{filename}')
-
-        photo_urls_json = json.dumps(photo_urls)
-        video_urls_json = json.dumps(video_urls)
-
-        query = """
-            INSERT INTO posts (user_id, content, video_url, photo_url, CategoryID, Title, ProductName) 
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-        """
-        connection = get_db_connection()
-        with connection.cursor() as cursor:
-            cursor.execute(query, (user_id, content, video_urls_json, photo_urls_json, category, title, product_name))
-            connection.commit()
-            post_id = cursor.lastrowid
-
+        # Mock response (เก็บข้อมูลในฐานข้อมูล)
         return jsonify({
-            'post_id': post_id,
-            'user_id': user_id,
-            'content': content,
-            'category': category,
-            'Title': title,
-            'ProductName': product_name,
-            'video_urls': video_urls,
-            'photo_urls': photo_urls,
+            "message": "โพสต์ถูกสร้างสำเร็จ",
+            "user_id": user_id,
+            "content": censored_content,
+            "category": category,
+            "Title": title,
+            "ProductName": product_name,
+            "photo_urls": photo_urls,
+            "video_urls": video_urls
         }), 201
 
     except Exception as e:
-        return jsonify({'error': f'Internal server error: {str(e)}'}), 500
-
-# Update a Post
-@app.route('/ai/posts/<int:id>', methods=['PUT'])
-@verify_token
-def update_post(id):
-    try:
-        user_id = int(request.form.get('user_id'))
-        title = request.form.get('Title')
-        content = request.form.get('content')
-        product_name = request.form.get('ProductName')
-        category_id = request.form.get('CategoryID')
-        existing_photos = request.form.getlist('existing_photos[]')
-        existing_videos = request.form.getlist('existing_videos[]')
-
-        if request.user_id != user_id:
-            return jsonify({'error': 'You are not authorized to update this post'}), 403
-
-        photo_urls = existing_photos if existing_photos else []
-        video_urls = existing_videos if existing_videos else []
-
-        if 'photo' in request.files:
-            for file in request.files.getlist('photo'):
-                filename = secure_filename(file.filename)
-                filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-                file.save(filepath)
-                photo_urls.append(f'/uploads/{filename}')
-
-        if 'video' in request.files:
-            for file in request.files.getlist('video'):
-                filename = secure_filename(file.filename)
-                filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-                file.save(filepath)
-                video_urls.append(f'/uploads/{filename}')
-
-        photo_urls_json = json.dumps(photo_urls)
-        video_urls_json = json.dumps(video_urls)
-
-        category_id = None if category_id == 'NULL' else category_id
-
-        query = """
-            UPDATE posts 
-            SET Title = %s, content = %s, ProductName = %s, CategoryID = %s, video_url = %s, photo_url = %s, updated_at = NOW()
-            WHERE id = %s AND user_id = %s
-        """
-        connection = get_db_connection()
-        with connection.cursor() as cursor:
-            cursor.execute(query, (title, content, product_name, category_id, video_urls_json, photo_urls_json, id, user_id))
-            connection.commit()
-
-            if cursor.rowcount == 0:
-                return jsonify({'error': 'Post not found or you are not the owner'}), 404
-
-        return jsonify({
-            'post_id': id,
-            'Title': title,
-            'content': content,
-            'ProductName': product_name,
-            'CategoryID': category_id,
-            'video_urls': video_urls,
-            'photo_urls': photo_urls,
-        })
-
-    except Exception as e:
-        return jsonify({'error': f'Internal server error: {str(e)}'}), 500
+        print(f"Error in create_post: {e}")
+        return jsonify({"error": str(e)}), 500
 
 # Endpoint สำหรับให้บริการไฟล์ที่อัปโหลด
 @app.route('/uploads/<filename>')
@@ -484,6 +459,55 @@ def uploaded_file(filename):
     except Exception as e:
         print(f"Error in uploaded_file: {e}")
         return jsonify({"error": "File not found"}), 404
+
+# Endpoint สำหรับอัปเดตโพสต์
+@app.route('/ai/posts/<int:id>', methods=['PUT'])
+def update_post(id):
+    try:
+        user_id = request.form.get('user_id')
+        content = request.form.get('content')
+        category = request.form.get('category')
+        title = request.form.get('Title')
+        product_name = request.form.get('ProductName')
+        photos = request.files.getlist('photo')
+        videos = request.files.getlist('video')
+
+        print(f"Update Post: id={id}, user_id={user_id}, content={content}, category={category}, title={title}, product_name={product_name}")
+
+        # ตรวจสอบคำหยาบ
+        censored_content, has_profanity = censor_profanity(content)
+        if has_profanity:
+            return jsonify({"error": "โพสต์มีคำหยาบ กรุณาแก้ไขเนื้อหา"}), 400
+
+        # ตรวจสอบภาพโป๊
+        for photo in photos:
+            photo_path = os.path.join(UPLOAD_FOLDER, photo.filename)
+            photo.save(photo_path)
+            if predict_image(photo_path):
+                os.remove(photo_path)
+                return jsonify({"error": "พบภาพโป๊ กรุณาลบภาพดังกล่าวออกจากโพสต์"}), 400
+
+        # บันทึก URL ของรูปภาพและวิดีโอ
+        photo_urls = [f'/uploads/{photo.filename}' for photo in photos]
+        video_urls = [f'/uploads/{video.filename}' for video in videos]
+
+        # Mock response (อัปเดตในฐานข้อมูล)
+        return jsonify({
+            "message": "โพสต์ถูกอัปเดตสำเร็จ",
+            "post_id": id,
+            "user_id": user_id,
+            "content": censored_content,
+            "category": category,
+            "Title": title,
+            "ProductName": product_name,
+            "photo_urls": photo_urls,
+            "video_urls": video_urls
+        }), 200
+
+    except Exception as e:
+        print(f"Error in update_post: {e}")
+        return jsonify({"error": str(e)}), 500
+    
 
 
 if __name__ == '__main__':
