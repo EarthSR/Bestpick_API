@@ -23,14 +23,7 @@ import random
 import sys
 import pickle
 from pythainlp import word_tokenize
-import tensorflow as tf
-from tensorflow.keras.preprocessing.image import img_to_array, load_img
-import numpy as np
-from werkzeug.utils import secure_filename
-import pymysql
-from flask import Flask, request, jsonify, send_from_directory
-from flask_cors import CORS
-from tensorflow.keras.utils import load_img, img_to_array
+
 
 
 app = Flask(__name__)
@@ -64,7 +57,7 @@ def search_and_scrape_advice_product(product_name, results):
     try:
         search_url = f"https://www.advice.co.th/search?keyword={product_name.replace(' ', '%20')}"
         driver.get(search_url)
-        time.sleep(2)
+        time.sleep(3)
         soup = BeautifulSoup(driver.page_source, 'html.parser')
         
         # ปรับการดึงข้อมูลสินค้าให้เฉพาะเจาะจงมากขึ้น
@@ -140,7 +133,7 @@ def search_and_scrape_banana_product(product_name, results):
         results['Banana'] = f"Error occurred during Banana IT scraping: {e}"
 
 # Flask route for searching multiple products
-@app.route('/ai/search', methods=['GET'])
+@app.route('/search', methods=['GET'])
 def search_product():
     product_name = request.args.get('productname')
     if not product_name:
@@ -171,9 +164,13 @@ tfidf_matrix = joblib.load('tfidf_matrix.pkl')
 cosine_sim = joblib.load('cosine_similarity.pkl')
 
 def load_data_from_db():
-    engine = create_engine('mysql+mysqlconnector://bestpick_user:bestpick7890@localhost/reviewapp')
+    # สร้าง engine สำหรับ SQLAlchemy
+    engine = create_engine('mysql+mysqlconnector://root:1234@localhost/ReviewAPP')
+    
+    # ดึงข้อมูลจากฐานข้อมูล
     query = "SELECT * FROM clean_new_view;"
-    return pd.read_sql(query, con=engine)
+    data = pd.read_sql(query, con=engine)  
+    return data
 
 # ฟังก์ชันสำหรับแนะนำโพสต์ตามเนื้อหาที่คล้ายกัน
 def content_based_recommendations(post_id, user_id):
@@ -253,7 +250,7 @@ def recommend_posts_for_user(user_id, alpha=0.7):
 
 
 # Configure your database URI
-app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+mysqlconnector://bestpick_user:bestpick7890@localhost/reviewapp'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+mysqlconnector://root:1234@localhost/ReviewAPP'
 
 # Initialize the SQLAlchemy object
 db = SQLAlchemy(app)
@@ -291,9 +288,69 @@ def verify_token(f):
 
 sys.stdout.reconfigure(encoding='utf-8')
 
+# โหลดโมเดลและ vectorizer จากไฟล์ .pkl
+with open('thai_profanity_model.pkl', 'rb') as model_file:
+    model, vectorizer = pickle.load(model_file)
+
+# ฟังก์ชันสำหรับการเซ็นเซอร์คำหยาบในประโยค
+def censor_profanity(sentence):
+    """
+    ฟังก์ชันนี้รับประโยค (sentence) เป็น input 
+    และจะเซ็นเซอร์คำที่เป็นคำหยาบโดยแทนที่ด้วยเครื่องหมาย '*'
+    สำหรับคำที่ไม่หยาบจะคงค่าเดิมไว้
+    """
+    words = word_tokenize(sentence, engine="newmm")
+    censored_words = []
+
+    for word in words:
+        try:
+            word_vectorized = vectorizer.transform([word])
+        except Exception as e:
+            censored_words.append(word)  # คืนค่าคำเดิมหากมีปัญหาในการประมวลผล
+            continue
+
+        if word_vectorized.nnz == 0:
+            censored_words.append(word)  # คำที่ไม่สามารถแปลงเป็นฟีเจอร์ได้
+            continue
+
+        prediction = model.predict(word_vectorized)
+
+        if prediction[0] == 1:
+            censored_words.append('*' * len(word))
+            print(f"Censored: {word} -> {'*' * len(word)}")  # เพิ่มการพิมพ์คำหยาบที่ถูกเซ็นเซอร์
+        else:
+            censored_words.append(word)
+
+    return ''.join(censored_words)
+
+
+# ฟังก์ชันดึงข้อมูลจากฐานข้อมูลและเซ็นเซอร์
+def fetch_and_censor_from_db():
+
+    engine = create_engine('mysql+mysqlconnector://root:1234@localhost/ReviewAPP')
+
+    # ดึงข้อมูลจากฐานข้อมูล (ปรับ query ตามที่ต้องการ)
+    query = "SELECT id, Title, content FROM posts WHERE status='active';"
+    posts = pd.read_sql(query, con=engine)
+
+    # เซ็นเซอร์ title และ content ของแต่ละโพสต์
+    posts['censored_title'] = posts['Title'].apply(censor_profanity)
+    posts['censored_content'] = posts['content'].apply(censor_profanity)
+
+    # แสดงผลลัพธ์ที่เซ็นเซอร์แล้ว
+    for _, row in posts.iterrows():
+        print(f"Post ID: {row['id']}")
+        print(f"Censored Title: {row['censored_title']}")
+        print(f"Censored Content: {row['censored_content']}")
+        print("-" * 30)
+
+# เรียกใช้ฟังก์ชันโดยตรง
+if __name__ == "__main__":
+    fetch_and_censor_from_db()
+
 #แก้6
 
-@app.route('/ai/recommend', methods=['POST'])
+@app.route('/recommend', methods=['POST'])
 @verify_token
 def recommend():
     try:
@@ -328,14 +385,15 @@ def recommend():
         recommendations = []
         for post in sorted_posts:
             # เซ็นเซอร์คำหยาบใน title และ content
-            
+            censored_title = censor_profanity(post['Title'])
+            censored_content = censor_profanity(post['content'])
 
             # สร้างรายการแนะนำโพสต์
             recommendations.append({
                 "id": post['id'],
                 "userId": post['user_id'],
-                "title": post['Title'],
-                "content": post['content'],
+                "title": censored_title,
+                "content": censored_content,
                 "updated": post['updated_at'].astimezone(timezone.utc).replace(microsecond=0).isoformat() + 'Z',
                 "photo_url": json.loads(post.get('photo_url', '[]')),
                 "video_url": json.loads(post.get('video_url', '[]')),
@@ -351,144 +409,15 @@ def recommend():
         print("Error in recommend function:", e)
         # ส่งข้อความ error กลับไปในรูปแบบ JSON
         return jsonify({"error": "Internal Server Error"}), 500
-    
 
-# Create a Post
-@app.route('/ai/posts/create', methods=['POST'])
-@verify_token
-def create_post():
-    try:
-        user_id = int(request.form.get('user_id'))
-        content = request.form.get('content')
-        category = request.form.get('category')
-        title = request.form.get('Title')
-        product_name = request.form.get('ProductName')
 
-        if request.user_id != user_id:
-            return jsonify({'error': 'You are not authorized to create a post for this user'}), 403
 
-        # Handle photo and video uploads
-        photo_urls = []
-        video_urls = []
 
-        if 'photo' in request.files:
-            for file in request.files.getlist('photo'):
-                filename = secure_filename(file.filename)
-                filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-                file.save(filepath)
-                photo_urls.append(f'/uploads/{filename}')
-
-        if 'video' in request.files:
-            for file in request.files.getlist('video'):
-                filename = secure_filename(file.filename)
-                filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-                file.save(filepath)
-                video_urls.append(f'/uploads/{filename}')
-
-        photo_urls_json = json.dumps(photo_urls)
-        video_urls_json = json.dumps(video_urls)
-
-        query = """
-            INSERT INTO posts (user_id, content, video_url, photo_url, CategoryID, Title, ProductName) 
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-        """
-        connection = get_db_connection()
-        with connection.cursor() as cursor:
-            cursor.execute(query, (user_id, content, video_urls_json, photo_urls_json, category, title, product_name))
-            connection.commit()
-            post_id = cursor.lastrowid
-
-        return jsonify({
-            'post_id': post_id,
-            'user_id': user_id,
-            'content': content,
-            'category': category,
-            'Title': title,
-            'ProductName': product_name,
-            'video_urls': video_urls,
-            'photo_urls': photo_urls,
-        }), 201
-
-    except Exception as e:
-        return jsonify({'error': f'Internal server error: {str(e)}'}), 500
-
-# Update a Post
-@app.route('/ai/posts/<int:id>', methods=['PUT'])
-@verify_token
-def update_post(id):
-    try:
-        user_id = int(request.form.get('user_id'))
-        title = request.form.get('Title')
-        content = request.form.get('content')
-        product_name = request.form.get('ProductName')
-        category_id = request.form.get('CategoryID')
-        existing_photos = request.form.getlist('existing_photos[]')
-        existing_videos = request.form.getlist('existing_videos[]')
-
-        if request.user_id != user_id:
-            return jsonify({'error': 'You are not authorized to update this post'}), 403
-
-        photo_urls = existing_photos if existing_photos else []
-        video_urls = existing_videos if existing_videos else []
-
-        if 'photo' in request.files:
-            for file in request.files.getlist('photo'):
-                filename = secure_filename(file.filename)
-                filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-                file.save(filepath)
-                photo_urls.append(f'/uploads/{filename}')
-
-        if 'video' in request.files:
-            for file in request.files.getlist('video'):
-                filename = secure_filename(file.filename)
-                filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-                file.save(filepath)
-                video_urls.append(f'/uploads/{filename}')
-
-        photo_urls_json = json.dumps(photo_urls)
-        video_urls_json = json.dumps(video_urls)
-
-        category_id = None if category_id == 'NULL' else category_id
-
-        query = """
-            UPDATE posts 
-            SET Title = %s, content = %s, ProductName = %s, CategoryID = %s, video_url = %s, photo_url = %s, updated_at = NOW()
-            WHERE id = %s AND user_id = %s
-        """
-        connection = get_db_connection()
-        with connection.cursor() as cursor:
-            cursor.execute(query, (title, content, product_name, category_id, video_urls_json, photo_urls_json, id, user_id))
-            connection.commit()
-
-            if cursor.rowcount == 0:
-                return jsonify({'error': 'Post not found or you are not the owner'}), 404
-
-        return jsonify({
-            'post_id': id,
-            'Title': title,
-            'content': content,
-            'ProductName': product_name,
-            'CategoryID': category_id,
-            'video_urls': video_urls,
-            'photo_urls': photo_urls,
-        })
-
-    except Exception as e:
-        return jsonify({'error': f'Internal server error: {str(e)}'}), 500
-
-# Endpoint สำหรับให้บริการไฟล์ที่อัปโหลด
-@app.route('/uploads/<filename>')
-def uploaded_file(filename):
-    try:
-        return send_from_directory(UPLOAD_FOLDER, filename)
-    except Exception as e:
-        print(f"Error in uploaded_file: {e}")
-        return jsonify({"error": "File not found"}), 404
 
 
 if __name__ == '__main__':
     try:
-        app.run(host='0.0.0.0', port=5005)
+        app.run(host='0.0.0.0', port=5000)
 
     finally:
         driver.quit()
