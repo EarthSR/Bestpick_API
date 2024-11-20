@@ -510,7 +510,7 @@ app.post("/api/login", async (req, res) => {
   try {
     const { email, password } = req.body;
 
-    // Get the user's IP address (optional)
+    // Get the users IP address (optional)
     const ipAddress =
       req.headers["x-forwarded-for"] || req.connection.remoteAddress;
 
