@@ -131,7 +131,7 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage: storage, // เปลี่ยนจาก dest เป็น storage ที่เราสร้างไว้
   limits: {
-    fileSize: 2 * 1024 * 1024 * 1024n, // จำกัดขนาดไฟล์ที่อัปโหลด (2GB)
+    fileSize: 2147483648,
   },
 });
 
