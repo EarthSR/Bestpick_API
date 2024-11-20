@@ -163,7 +163,7 @@ function sendOtpEmail(email, otp, callback) {
           ${otp}
         </div>
         <p>This code will expire in 10 minutes.</p>
-        <p>If you didn't request this, please ignore this email.</p>
+        <p>If you didnt request this, please ignore this email.</p>
         <p style="margin-top: 20px;">Thanks, <br> The Team</p>
         <hr>
         <p style="font-size: 12px; color: #999;">This is an automated email, please do not reply.</p>
