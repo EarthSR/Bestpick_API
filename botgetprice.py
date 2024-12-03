@@ -165,33 +165,19 @@ def search_product():
 
     return jsonify(results)
 
+
+
 # โหลดโมเดล SVD และ TF-IDF พร้อมกับ cosine similarity
 collaborative_model = joblib.load('collaborative_model.pkl')
 tfidf = joblib.load('tfidf_model.pkl')
 tfidf_matrix = joblib.load('tfidf_matrix.pkl')
 cosine_sim = joblib.load('cosine_similarity.pkl')
 
+# ฟังก์ชันสำหรับโหลดข้อมูลจากฐานข้อมูล
 def load_data_from_db():
     engine = create_engine('mysql+mysqlconnector://bestpick_user:bestpick7890@localhost/reviewapp')
     query = "SELECT * FROM clean_new_view;"
     return pd.read_sql(query, con=engine)
-
-# ฟังก์ชันสำหรับแนะนำโพสต์ตามเนื้อหาที่คล้ายกัน
-def content_based_recommendations(post_id, user_id):
-    data = load_data_from_db()  # โหลดข้อมูลใหม่ทุกครั้ง
-    try:
-        idx = data.index[data['post_id'] == post_id][0]
-        sim_scores = list(enumerate(cosine_sim[idx]))
-        sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
-        sim_scores = sim_scores[1:11]  # แนะนำโพสต์ที่คล้ายที่สุด 10 อันดับแรก
-        post_indices = [i[0] for i in sim_scores]
-        
-        # ตรวจสอบโพสต์ที่คล้ายกัน
-        print(f"Post ID: {post_id}, Similar Posts: {data['post_id'].iloc[post_indices].values}")
-        
-        return data['post_id'].iloc[post_indices]
-    except IndexError:
-        return []
 
 # ฟังก์ชัน Hybrid สำหรับแนะนำโพสต์
 def hybrid_recommendations(user_id, post_id, alpha=0.85):
@@ -205,7 +191,22 @@ def hybrid_recommendations(user_id, post_id, alpha=0.85):
     # คำนวณคะแนนสุดท้ายโดยให้น้ำหนักกับ Collaborative Filtering มากกว่า
     final_score = alpha * collab_pred + (1 - alpha) * content_pred
     return {"post_id": post_id, "final_score": final_score}
+# ฟังก์ชันสำหรับแนะนำโพสต์ตามเนื้อหาที่คล้ายกัน
+def content_based_recommendations(post_id, user_id):
+    data = load_data_from_db()  # โหลดข้อมูลใหม่ทุกครั้ง
+    try:
+        idx = data.index[data['post_id'] == post_id][0]
+        sim_scores = list(enumerate(cosine_sim[idx]))
+        sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
+        sim_scores = sim_scores[1:11]  # แนะนำโพสต์ที่คล้ายที่สุด 10 อันดับแรก
+        post_indices = [i[0] for i in sim_scores]
+        
+        # ตรวจสอบโพสต์ที่คล้ายกัน
+        return data['post_id'].iloc[post_indices]
+    except IndexError:
+        return []
 
+# ฟังก์ชันสำหรับคำนวณคะแนนการแนะนำโพสต์ทั้งหมดสำหรับผู้ใช้
 def recommend_posts_for_user(user_id, alpha=0.7):
     data = load_data_from_db()  # โหลดข้อมูลใหม่ทุกครั้ง
 
@@ -213,8 +214,6 @@ def recommend_posts_for_user(user_id, alpha=0.7):
     data = data.drop_duplicates(subset='post_id')
 
     post_scores = []
-
-    # วันที่ปัจจุบัน
     current_date = pd.to_datetime("now")
 
     # วนผ่านโพสต์ทั้งหมดเพื่อคำนวณคะแนนการแนะนำ
@@ -230,26 +229,19 @@ def recommend_posts_for_user(user_id, alpha=0.7):
         if age_in_days <= 7:
             final_score += 1.0  # เพิ่มคะแนนให้กับโพสต์ใหม่
 
-        post_scores.append((int(score['post_id']), final_score))  # แปลงเป็น int และ float เพื่อความปลอดภัยในการ serialize
-
+        post_scores.append((int(score['post_id']), final_score))
 
     # เรียงลำดับโพสต์ตามคะแนนจากมากไปน้อย
-    post_scores = sorted(post_scores, key=lambda x: x[1], reverse=True)  # เรียงตามคะแนน
-
+    post_scores = sorted(post_scores, key=lambda x: x[1], reverse=True)
 
     # สุ่มเลือก 3 โพสต์แรกที่มีคะแนนสูงสุด
     top_posts = post_scores[:3]  # 3 โพสต์แรกที่มีคะแนนสูงสุด
     remaining_posts = post_scores[3:]  # โพสต์ที่เหลือ
 
-    # แสดงผลโพสต์ที่แนะนำ
-    recommended_posts = top_posts + remaining_posts  # รวมผลลัพธ์
-
-    for post_id, score in recommended_posts:
-        post_details = data.loc[data['post_id'] == post_id].iloc[0]  # ดึงข้อมูลโพสต์ตาม ID
-        print(f"Post ID: {post_id}, Score: {score}, Content: {post_details['post_content']}, Title: {post_details['post_title']}")
+    # รวมผลลัพธ์
+    recommended_posts = top_posts + remaining_posts
 
     return recommended_posts
-
 
 
 
@@ -292,149 +284,63 @@ def verify_token(f):
 
 sys.stdout.reconfigure(encoding='utf-8')
 
-#แก้6
-
-UPLOAD_FOLDER = './uploads'
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-
-# ฟังก์ชันสำหรับเซ็นเซอร์คำหยาบในหลายฟิลด์
-def apply_profanity_filter(*fields):
-    return [censor_profanity(field) for field in fields]
 
 
-# ฟังก์ชันสำหรับสร้างโพสต์
-@app.route('/ai/posts/create', methods=['POST'])
-def create_post():
+# ฟังก์ชันสำหรับการแนะนำโพสต์ใน API Route
+@app.route('/ai/recommend', methods=['POST'])
+@verify_token
+def recommend():
     try:
-        user_id = request.form.get('user_id')
-        content = request.form.get('content')
-        category = request.form.get('category')
-        title = request.form.get('Title')
-        product_name = request.form.get('ProductName')
-        photos = request.files.getlist('photo')
-        videos = request.files.getlist('video')
+        user_id = request.user_id
+        post_scores = recommend_posts_for_user(user_id)
 
-        # เซ็นเซอร์คำหยาบในเนื้อหา
-        censored_content, censored_title, censored_product_name = apply_profanity_filter(
-            content, title, product_name)
+        if not post_scores:
+            return jsonify({"error": "No recommendations found"}), 404
 
-        # ตรวจสอบภาพโป๊
-        photo_urls = []
-        for photo in photos:
-            photo_path = os.path.join(UPLOAD_FOLDER, secure_filename(photo.filename))
-            photo.save(photo_path)
-            if predict_image(photo_path):  # ตรวจสอบว่าภาพเป็นโป๊หรือไม่
-                os.remove(photo_path)  # ลบภาพที่ไม่เหมาะสม
-                return jsonify({"error": "พบภาพโป๊ กรุณาลบภาพดังกล่าวออกจากโพสต์"}), 400
-            photo_urls.append(f'/uploads/{secure_filename(photo.filename)}')
+        # เตรียม post_ids จาก post_scores
+        post_ids = [post_id for post_id, _ in post_scores]
 
-        # เก็บ URL ของวิดีโอ
-        video_urls = [f'/uploads/{secure_filename(video.filename)}' for video in videos]
+        # ตรวจสอบว่า post_ids ถูกต้อง
+        print("Post IDs for database query:", post_ids)
 
-        # บันทึกลงฐานข้อมูล
-        with connection.cursor() as cursor:
-            query = """
-                INSERT INTO posts (user_id, content, video_url, photo_url, CategoryID, Title, ProductName)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-            """
-            cursor.execute(query, (user_id, censored_content, json.dumps(video_urls),
-                                   json.dumps(photo_urls), category, censored_title, censored_product_name))
-            connection.commit()
+        placeholders = ', '.join([f':id_{i}' for i in range(len(post_ids))])
+        query = text(f"""
+            SELECT posts.*, users.username, users.picture, 
+                   (SELECT COUNT(*) FROM likes WHERE post_id = posts.id AND user_id = :user_id) AS is_liked
+            FROM posts 
+            JOIN users ON posts.user_id = users.id
+            WHERE posts.status = 'active' AND posts.id IN ({placeholders})
+        """)
 
-        return jsonify({
-            "message": "โพสต์ถูกสร้างสำเร็จ",
-            "user_id": user_id,
-            "content": censored_content,
-            "category": category,
-            "Title": censored_title,
-            "ProductName": censored_product_name,
-            "photo_urls": photo_urls,
-            "video_urls": video_urls
-        }), 201
+        params = {'user_id': user_id, **{f'id_{i}': post_id for i, post_id in enumerate(post_ids)}}
+        result = db.session.execute(query, params).fetchall()
+        posts = [row._mapping for row in result]
+
+        # ใช้ post_scores เพื่อจัดเรียงโพสต์ตามคะแนน
+        sorted_posts = sorted(posts, key=lambda x: post_scores[post_ids.index(x['id'])][1], reverse=True)
+
+        recommendations = []
+        for post in sorted_posts:
+            recommendations.append({
+                "id": post['id'],
+                "userId": post['user_id'],
+                "title": post['Title'],
+                "content": post['content'],
+                "updated": post['updated_at'].astimezone(timezone.utc).replace(microsecond=0).isoformat() + 'Z',
+                "photo_url": json.loads(post.get('photo_url', '[]')),
+                "video_url": json.loads(post.get('video_url', '[]')),
+                "userName": post['username'],
+                "userProfileUrl": post['picture'],
+                "is_liked": post['is_liked'] > 0
+            })
+
+        return jsonify(recommendations)
 
     except Exception as e:
-        print(f"Error in create_post: {e}")
-        return jsonify({"error": str(e)}), 500
+        print("Error in recommend function:", e)
+        return jsonify({"error": "Internal Server Error"}), 500
 
 
-# ฟังก์ชันสำหรับอัปเดตโพสต์
-@app.route('/ai/posts/<int:id>', methods=['PUT'])
-def update_post(id):
-    try:
-        user_id = request.form.get('user_id')
-        content = request.form.get('content')
-        category = request.form.get('category')
-        title = request.form.get('Title')
-        product_name = request.form.get('ProductName')
-        existing_photos = json.loads(request.form.get('existing_photos', '[]'))
-        existing_videos = json.loads(request.form.get('existing_videos', '[]'))
-        photos = request.files.getlist('photo')
-        videos = request.files.getlist('video')
-
-        # ตรวจสอบว่า user_id ตรงกับเจ้าของโพสต์หรือไม่
-        if not user_id or not str(id).isdigit():
-            return jsonify({"error": "Invalid user ID or post ID"}), 400
-
-        # เซ็นเซอร์คำหยาบในฟิลด์ต่าง ๆ
-        censored_content, censored_title, censored_product_name = apply_profanity_filter(
-            content, title, product_name)
-
-        # รวมไฟล์ภาพและวิดีโอใหม่กับไฟล์ที่มีอยู่
-        photo_urls = existing_photos if isinstance(existing_photos, list) else []
-        video_urls = existing_videos if isinstance(existing_videos, list) else []
-
-        # ตรวจสอบภาพใหม่
-        for photo in photos:
-            photo_path = os.path.join(UPLOAD_FOLDER, secure_filename(photo.filename))
-            photo.save(photo_path)
-            if predict_image(photo_path):  # ตรวจสอบว่าภาพเป็นโป๊หรือไม่
-                os.remove(photo_path)  # ลบภาพที่ไม่เหมาะสม
-                return jsonify({"error": "พบภาพโป๊ กรุณาลบภาพดังกล่าวออกจากโพสต์"}), 400
-            photo_urls.append(f'/uploads/{secure_filename(photo.filename)}')
-
-        # บันทึกวิดีโอใหม่
-        for video in videos:
-            video_path = os.path.join(UPLOAD_FOLDER, secure_filename(video.filename))
-            video.save(video_path)
-            video_urls.append(f'/uploads/{secure_filename(video.filename)}')
-
-        # JSON encode URLs
-        photo_urls_json = json.dumps(photo_urls)
-        video_urls_json = json.dumps(video_urls)
-
-        # อัปเดตโพสต์ในฐานข้อมูล
-        with connection.cursor() as cursor:
-            query = """
-                UPDATE posts
-                SET content = %s, Title = %s, ProductName = %s, CategoryID = %s, 
-                    video_url = %s, photo_url = %s, updated_at = NOW()
-                WHERE id = %s AND user_id = %s
-            """
-            cursor.execute(query, (censored_content, censored_title, censored_product_name, category,
-                                   video_urls_json, photo_urls_json, id, user_id))
-            connection.commit()
-
-            # ตรวจสอบว่ามีการอัปเดตหรือไม่
-            if cursor.rowcount == 0:
-                return jsonify({"error": "Post not found or you are not the owner"}), 404
-
-        return jsonify({
-            "message": "โพสต์ถูกอัปเดตสำเร็จ",
-            "post_id": id,
-            "user_id": user_id,
-            "content": censored_content,
-            "category": category,
-            "Title": censored_title,
-            "ProductName": censored_product_name,
-            "photo_urls": photo_urls,
-            "video_urls": video_urls
-        }), 200
-
-    except Exception as e:
-        print(f"Error in update_post: {e}")
-        return jsonify({"error": str(e)}), 500
-    
-    
 
 if __name__ == '__main__':
     try:
