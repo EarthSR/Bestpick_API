@@ -6,7 +6,7 @@ import joblib
 
 # ฟังก์ชันสำหรับโหลดข้อมูลจาก CSV
 def load_data_from_csv():
-    file_path = 'simulated_data.csv'  # แก้ไขให้ตรงกับที่อยู่ของไฟล์ CSV ของคุณ
+    file_path = 'clean_new_view.csv'  # แก้ไขให้ตรงกับที่อยู่ของไฟล์ CSV ของคุณ
     data = pd.read_csv(file_path)  # โหลดข้อมูลจาก CSV
     return data
 

@@ -7,7 +7,7 @@ from math import sqrt
 
 # ฟังก์ชันสำหรับโหลดข้อมูลจาก CSV
 def load_data_from_csv():
-    file_path = 'simulated_data.csv'  # แก้ไขให้ตรงกับที่อยู่ของไฟล์ CSV ของคุณ
+    file_path = 'clean_new_view.csv'  # แก้ไขให้ตรงกับที่อยู่ของไฟล์ CSV ของคุณ
     data = pd.read_csv(file_path)
     return data
 
@@ -48,8 +48,17 @@ def evaluate_model_with_cross_validation():
     
     # แสดงผลการประเมินผล
     print(f"Cross-validation results:")
-    print(f"Average RMSE: {results['test_rmse'].mean()}")
-    print(f"Average MAE: {results['test_mae'].mean()}")
+    avg_rmse = results['test_rmse'].mean()
+    avg_mae = results['test_mae'].mean()
+
+    # คำนวณความแม่นยำจาก RMSE และ MAE
+    accuracy_rmse = 100 - avg_rmse
+    accuracy_mae = 100 - avg_mae
+    
+    print(f"Average RMSE: {avg_rmse}")
+    print(f"Average MAE: {avg_mae}")
+    print(f"Accuracy based on RMSE: {accuracy_rmse:.2f}%")
+    print(f"Accuracy based on MAE: {accuracy_mae:.2f}%")
 
     return results
 
