@@ -23,6 +23,14 @@ import random
 import sys
 import pickle
 from pythainlp import word_tokenize
+import tensorflow as tf
+from tensorflow.keras.preprocessing.image import img_to_array, load_img
+import numpy as np
+from werkzeug.utils import secure_filename
+import pymysql
+from flask_cors import CORS
+from profanityAI import censor_profanity  # AI สำหรับเซ็นเซอร์คำหยาบ
+from imageAI import predict_image  # AI สำหรับตรวจจับภาพโป๊
 
 
 
@@ -157,33 +165,19 @@ def search_product():
 
     return jsonify(results)
 
+
+
 # โหลดโมเดล SVD และ TF-IDF พร้อมกับ cosine similarity
 collaborative_model = joblib.load('collaborative_model.pkl')
 tfidf = joblib.load('tfidf_model.pkl')
 tfidf_matrix = joblib.load('tfidf_matrix.pkl')
 cosine_sim = joblib.load('cosine_similarity.pkl')
 
+# ฟังก์ชันสำหรับโหลดข้อมูลจากฐานข้อมูล
 def load_data_from_db():
     engine = create_engine('mysql+mysqlconnector://bestpick_user:bestpick7890@localhost/reviewapp')
     query = "SELECT * FROM clean_new_view;"
     return pd.read_sql(query, con=engine)
-
-# ฟังก์ชันสำหรับแนะนำโพสต์ตามเนื้อหาที่คล้ายกัน
-def content_based_recommendations(post_id, user_id):
-    data = load_data_from_db()  # โหลดข้อมูลใหม่ทุกครั้ง
-    try:
-        idx = data.index[data['post_id'] == post_id][0]
-        sim_scores = list(enumerate(cosine_sim[idx]))
-        sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
-        sim_scores = sim_scores[1:11]  # แนะนำโพสต์ที่คล้ายที่สุด 10 อันดับแรก
-        post_indices = [i[0] for i in sim_scores]
-        
-        # ตรวจสอบโพสต์ที่คล้ายกัน
-        print(f"Post ID: {post_id}, Similar Posts: {data['post_id'].iloc[post_indices].values}")
-        
-        return data['post_id'].iloc[post_indices]
-    except IndexError:
-        return []
 
 # ฟังก์ชัน Hybrid สำหรับแนะนำโพสต์
 def hybrid_recommendations(user_id, post_id, alpha=0.85):
@@ -197,7 +191,22 @@ def hybrid_recommendations(user_id, post_id, alpha=0.85):
     # คำนวณคะแนนสุดท้ายโดยให้น้ำหนักกับ Collaborative Filtering มากกว่า
     final_score = alpha * collab_pred + (1 - alpha) * content_pred
     return {"post_id": post_id, "final_score": final_score}
+# ฟังก์ชันสำหรับแนะนำโพสต์ตามเนื้อหาที่คล้ายกัน
+def content_based_recommendations(post_id, user_id):
+    data = load_data_from_db()  # โหลดข้อมูลใหม่ทุกครั้ง
+    try:
+        idx = data.index[data['post_id'] == post_id][0]
+        sim_scores = list(enumerate(cosine_sim[idx]))
+        sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
+        sim_scores = sim_scores[1:11]  # แนะนำโพสต์ที่คล้ายที่สุด 10 อันดับแรก
+        post_indices = [i[0] for i in sim_scores]
+        
+        # ตรวจสอบโพสต์ที่คล้ายกัน
+        return data['post_id'].iloc[post_indices]
+    except IndexError:
+        return []
 
+# ฟังก์ชันสำหรับคำนวณคะแนนการแนะนำโพสต์ทั้งหมดสำหรับผู้ใช้
 def recommend_posts_for_user(user_id, alpha=0.7):
     data = load_data_from_db()  # โหลดข้อมูลใหม่ทุกครั้ง
 
@@ -205,8 +214,6 @@ def recommend_posts_for_user(user_id, alpha=0.7):
     data = data.drop_duplicates(subset='post_id')
 
     post_scores = []
-
-    # วันที่ปัจจุบัน
     current_date = pd.to_datetime("now")
 
     # วนผ่านโพสต์ทั้งหมดเพื่อคำนวณคะแนนการแนะนำ
@@ -222,26 +229,19 @@ def recommend_posts_for_user(user_id, alpha=0.7):
         if age_in_days <= 7:
             final_score += 1.0  # เพิ่มคะแนนให้กับโพสต์ใหม่
 
-        post_scores.append((int(score['post_id']), final_score))  # แปลงเป็น int และ float เพื่อความปลอดภัยในการ serialize
-
+        post_scores.append((int(score['post_id']), final_score))
 
     # เรียงลำดับโพสต์ตามคะแนนจากมากไปน้อย
-    post_scores = sorted(post_scores, key=lambda x: x[1], reverse=True)  # เรียงตามคะแนน
-
+    post_scores = sorted(post_scores, key=lambda x: x[1], reverse=True)
 
     # สุ่มเลือก 3 โพสต์แรกที่มีคะแนนสูงสุด
     top_posts = post_scores[:3]  # 3 โพสต์แรกที่มีคะแนนสูงสุด
     remaining_posts = post_scores[3:]  # โพสต์ที่เหลือ
 
-    # แสดงผลโพสต์ที่แนะนำ
-    recommended_posts = top_posts + remaining_posts  # รวมผลลัพธ์
-
-    for post_id, score in recommended_posts:
-        post_details = data.loc[data['post_id'] == post_id].iloc[0]  # ดึงข้อมูลโพสต์ตาม ID
-        print(f"Post ID: {post_id}, Score: {score}, Content: {post_details['post_content']}, Title: {post_details['post_title']}")
+    # รวมผลลัพธ์
+    recommended_posts = top_posts + remaining_posts
 
     return recommended_posts
-
 
 
 
@@ -284,8 +284,9 @@ def verify_token(f):
 
 sys.stdout.reconfigure(encoding='utf-8')
 
-#แก้6
 
+
+# ฟังก์ชันสำหรับการแนะนำโพสต์ใน API Route
 @app.route('/ai/recommend', methods=['POST'])
 @verify_token
 def recommend():
@@ -320,10 +321,6 @@ def recommend():
 
         recommendations = []
         for post in sorted_posts:
-            # เซ็นเซอร์คำหยาบใน title และ content
-            
-
-            # สร้างรายการแนะนำโพสต์
             recommendations.append({
                 "id": post['id'],
                 "userId": post['user_id'],
@@ -340,10 +337,9 @@ def recommend():
         return jsonify(recommendations)
 
     except Exception as e:
-        # พิมพ์ข้อความ error ใน Console เพื่อให้คุณเห็นรายละเอียด
         print("Error in recommend function:", e)
-        # ส่งข้อความ error กลับไปในรูปแบบ JSON
         return jsonify({"error": "Internal Server Error"}), 500
+
 
 
 if __name__ == '__main__':
