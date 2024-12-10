@@ -320,8 +320,13 @@ def recommend():
         if not recommendations:
             return jsonify({"error": "No recommendations found"}), 404
 
-        # กรองโพสต์ที่เคยมีปฏิสัมพันธ์ออกจากการ Query รายละเอียด
-        unique_recommendations = [post_id for post_id in recommendations if post_id not in collaborative_data[collaborative_data['user_id'] == user_id]['post_id'].tolist()]
+        # แยกโพสต์ที่มีปฏิสัมพันธ์และโพสต์ใหม่
+        user_interactions = collaborative_data[collaborative_data['user_id'] == user_id]['post_id'].tolist()
+        new_recommendations = [post_id for post_id in recommendations if post_id not in user_interactions]
+        interacted_recommendations = [post_id for post_id in recommendations if post_id in user_interactions]
+
+        # **รวมโพสต์ใหม่กับโพสต์ที่เคยมีปฏิสัมพันธ์ โดยยังรักษาโพสต์ที่มีปฏิสัมพันธ์ในตำแหน่งเดิม**
+        unique_recommendations = new_recommendations + interacted_recommendations
 
         # Query for post details
         placeholders = ', '.join([f':id_{i}' for i in range(len(unique_recommendations))])
@@ -337,8 +342,11 @@ def recommend():
         result = db.session.execute(query, params).fetchall()
         posts = [row._mapping for row in result]
 
+        # ใช้ unique_recommendations เพื่อรักษาลำดับที่แนะนำ
+        sorted_posts = sorted(posts, key=lambda x: unique_recommendations.index(x['id']))
+
         output = []
-        for post in posts:
+        for post in sorted_posts:
             output.append({
                 "id": post['id'],
                 "userId": post['user_id'],
