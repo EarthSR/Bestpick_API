@@ -23,14 +23,10 @@ import random
 import sys
 import pickle
 from pythainlp import word_tokenize
-import tensorflow as tf
-from tensorflow.keras.preprocessing.image import img_to_array, load_img
-import numpy as np
-from werkzeug.utils import secure_filename
-import pymysql
-from flask_cors import CORS
-from profanityAI import censor_profanity  # AI สำหรับเซ็นเซอร์คำหยาบ
-from imageAI import predict_image  # AI สำหรับตรวจจับภาพโป๊
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+from surprise import SVD, Dataset, Reader
+from functools import wraps
 
 
 
@@ -165,112 +161,27 @@ def search_product():
 
     return jsonify(results)
 
-
-
-# โหลดโมเดล SVD และ TF-IDF พร้อมกับ cosine similarity
-collaborative_model = joblib.load('collaborative_model.pkl')
-tfidf = joblib.load('tfidf_model.pkl')
-tfidf_matrix = joblib.load('tfidf_matrix.pkl')
-cosine_sim = joblib.load('cosine_similarity.pkl')
-
-# ฟังก์ชันสำหรับโหลดข้อมูลจากฐานข้อมูล
-def load_data_from_db():
-    engine = create_engine('mysql+mysqlconnector://bestpick_user:bestpick7890@localhost/reviewapp')
-    query = "SELECT * FROM clean_new_view;"
-    return pd.read_sql(query, con=engine)
-
-# ฟังก์ชัน Hybrid สำหรับแนะนำโพสต์
-def hybrid_recommendations(user_id, post_id, alpha=0.85):
-    # คาดการณ์จาก Collaborative Filtering
-    collab_pred = collaborative_model.predict(user_id, post_id).est
-    
-    # เรียกใช้ Content-Based Recommendations
-    content_recs = content_based_recommendations(post_id, user_id)
-    content_pred = 0.5 if post_id in content_recs else 0
-    
-    # คำนวณคะแนนสุดท้ายโดยให้น้ำหนักกับ Collaborative Filtering มากกว่า
-    final_score = alpha * collab_pred + (1 - alpha) * content_pred
-    return {"post_id": post_id, "final_score": final_score}
-# ฟังก์ชันสำหรับแนะนำโพสต์ตามเนื้อหาที่คล้ายกัน
-def content_based_recommendations(post_id, user_id):
-    data = load_data_from_db()  # โหลดข้อมูลใหม่ทุกครั้ง
-    try:
-        idx = data.index[data['post_id'] == post_id][0]
-        sim_scores = list(enumerate(cosine_sim[idx]))
-        sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
-        sim_scores = sim_scores[1:11]  # แนะนำโพสต์ที่คล้ายที่สุด 10 อันดับแรก
-        post_indices = [i[0] for i in sim_scores]
-        
-        # ตรวจสอบโพสต์ที่คล้ายกัน
-        return data['post_id'].iloc[post_indices]
-    except IndexError:
-        return []
-
-# ฟังก์ชันสำหรับคำนวณคะแนนการแนะนำโพสต์ทั้งหมดสำหรับผู้ใช้
-def recommend_posts_for_user(user_id, alpha=0.7):
-    data = load_data_from_db()  # โหลดข้อมูลใหม่ทุกครั้ง
-
-    # ลบโพสต์ที่มี post_id ซ้ำใน DataFrame
-    data = data.drop_duplicates(subset='post_id')
-
-    post_scores = []
-    current_date = pd.to_datetime("now")
-
-    # วนผ่านโพสต์ทั้งหมดเพื่อคำนวณคะแนนการแนะนำ
-    for post_id in data['post_id'].unique():
-        score = hybrid_recommendations(user_id, post_id, alpha=alpha)
-        final_score = float(score['final_score'])
-
-        # เพิ่มคะแนนสำหรับโพสต์ใหม่ (ถ้ามีคอลัมน์ updated_at)
-        post_date = pd.to_datetime(data.loc[data['post_id'] == post_id, 'updated_at'].values[0])
-        age_in_days = (current_date - post_date).days
-
-        # สมมุติว่าเพิ่ม 2 คะแนนสำหรับโพสต์ที่สร้างใน 7 วันที่ผ่านมา
-        if age_in_days <= 7:
-            final_score += 1.0  # เพิ่มคะแนนให้กับโพสต์ใหม่
-
-        post_scores.append((int(score['post_id']), final_score))
-
-    # เรียงลำดับโพสต์ตามคะแนนจากมากไปน้อย
-    post_scores = sorted(post_scores, key=lambda x: x[1], reverse=True)
-
-    # สุ่มเลือก 3 โพสต์แรกที่มีคะแนนสูงสุด
-    top_posts = post_scores[:3]  # 3 โพสต์แรกที่มีคะแนนสูงสุด
-    remaining_posts = post_scores[3:]  # โพสต์ที่เหลือ
-
-    # รวมผลลัพธ์
-    recommended_posts = top_posts + remaining_posts
-
-    return recommended_posts
-
-
-
 # Configure your database URI
-app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+mysqlconnector://bestpick_user:bestpick7890@localhost/reviewapp'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+mysqlconnector://root:1234@localhost/reviewapp'
 
 # Initialize the SQLAlchemy object
 db = SQLAlchemy(app)
 
 load_dotenv()
-# Secret key for encoding/decoding JWT tokens (make sure to keep it secure)
+# Secret key for encoding/decoding JWT tokens
 JWT_SECRET = os.getenv('JWT_SECRET')
+
 
 def verify_token(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        # Get the Authorization header
         auth_header = request.headers.get("Authorization")
-
         if not auth_header or not auth_header.startswith("Bearer "):
             return jsonify({"error": "No token provided or incorrect format"}), 403
 
-        # Extract the token part from "Bearer <token>"
         token = auth_header.split(" ")[1]
-
         try:
-            # Decode the token using JWT_SECRET
             decoded = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
-            # Add user ID and role to the request context
             request.user_id = decoded.get("id")
             request.role = decoded.get("role")
         except jwt.ExpiredSignatureError:
@@ -282,46 +193,153 @@ def verify_token(f):
 
     return decorated_function
 
-sys.stdout.reconfigure(encoding='utf-8')
+def load_data_from_db():
+    engine = create_engine('mysql+mysqlconnector://root:1234@localhost/reviewapp')
+    query_content = "SELECT * FROM contentbasedview;"
+    query_collaborative = "SELECT * FROM collaborativeview;"
 
+    content_data = pd.read_sql(query_content, con=engine)
+    collaborative_data = pd.read_sql(query_collaborative, con=engine)
 
+    return content_data, collaborative_data
 
-# ฟังก์ชันสำหรับการแนะนำโพสต์ใน API Route
+def normalize_scores(series):
+    """ทำให้คะแนนอยู่ในช่วง [0, 1]"""
+    min_val, max_val = series.min(), series.max()
+    if max_val > min_val:
+        return (series - min_val) / (max_val - min_val)
+    return series
+
+def normalize_engagement(data, user_column='owner_id', engagement_column='WeightedEngagement'):
+    """ปรับ Engagement ให้เหมาะสมตามผู้ใช้แต่ละคน"""
+    data['NormalizedEngagement'] = data.groupby(user_column)[engagement_column].transform(lambda x: normalize_scores(x))
+    return data
+
+def analyze_comments(comments):
+    """วิเคราะห์ความรู้สึกของคอมเมนต์ รองรับทั้งภาษาไทยและภาษาอังกฤษ"""
+    sentiment_scores = []
+    for comment in comments:
+        try:
+            if pd.isna(comment):
+                sentiment_scores.append(0)
+            else:
+                # ตรวจสอบว่าเป็นภาษาไทยหรือไม่
+                if any('\u0E00' <= char <= '\u0E7F' for char in comment):
+                    tokenized_comment = ' '.join(word_tokenize(comment, engine='newmm'))
+                else:
+                    tokenized_comment = comment
+
+                blob = TextBlob(tokenized_comment)
+                polarity = blob.sentiment.polarity  # ช่วงค่า -1 ถึง 1
+                if polarity > 0.5:
+                    sentiment_scores.append(3)
+                elif 0 < polarity <= 0.5:
+                    sentiment_scores.append(1)
+                elif -0.5 <= polarity < 0:
+                    sentiment_scores.append(-1)
+                else:
+                    sentiment_scores.append(-3)
+        except Exception as e:
+            sentiment_scores.append(0)
+    return sentiment_scores
+
+def enrich_content_data(content_data):
+    """เพิ่มข้อมูลที่จำเป็นสำหรับ Content-Based Filtering"""
+    content_data['SentimentScore'] = analyze_comments(content_data['Comments'])
+    content_data['WeightedEngagement'] = 0.75 * content_data['PostEngagement'] + \
+                                         0.25 * normalize_scores(pd.Series(content_data['SentimentScore']))
+    content_data = normalize_engagement(content_data)
+    return content_data
+
+def recommend_hybrid(user_id, data, collaborative_data, collaborative_model, cosine_sim, categories, alpha=0.9):
+    """แนะนำโพสต์โดยใช้ Hybrid Filtering รวม Collaborative และ Content-Based"""
+    if not (0 <= alpha <= 1):
+        raise ValueError("Alpha ต้องอยู่ในช่วง 0 ถึง 1")
+
+    user_interactions = collaborative_data[collaborative_data['user_id'] == user_id]['post_id'].tolist()
+    interacted_posts = data[data['owner_id'] == user_id]['post_id'].tolist()
+    unviewed_data = data[~data['post_id'].isin(interacted_posts)]
+
+    recommendations = []
+    for category in categories:
+        category_data = unviewed_data[unviewed_data[category] == 1]
+        for _, post in category_data.iterrows():
+            collab_score = collaborative_model.predict(user_id, post['post_id']).est
+            collab_normalized = normalize_scores(pd.Series([collab_score])).iloc[0]
+
+            idx = data.index[data['post_id'] == post['post_id']].tolist()
+            content_score = 0
+            if idx:
+                idx = idx[0]
+                sim_scores = list(enumerate(cosine_sim[idx]))
+                sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
+                content_score = sum(data.iloc[i[0]]['NormalizedEngagement'] for i in sim_scores[:20]) / 20
+
+            content_normalized = normalize_scores(pd.Series([content_score])).iloc[0]
+
+            final_score = alpha * collab_normalized + (1 - alpha) * content_normalized
+            recommendations.append((post['post_id'], final_score))
+
+    recommendations_df = pd.DataFrame(recommendations, columns=['post_id', 'score'])
+    recommendations_df['normalized_score'] = normalize_scores(recommendations_df['score'])
+
+    interacted_df = recommendations_df[recommendations_df['post_id'].isin(user_interactions)]
+    new_posts_df = recommendations_df[~recommendations_df['post_id'].isin(user_interactions)]
+
+    new_posts_df = new_posts_df.sort_values(by='normalized_score', ascending=False)
+    interacted_df = interacted_df.sort_values(by='normalized_score', ascending=False)
+
+    recommendations = pd.concat([new_posts_df, interacted_df])['post_id'].tolist()
+
+    return recommendations
+
 @app.route('/ai/recommend', methods=['POST'])
 @verify_token
 def recommend():
     try:
         user_id = request.user_id
-        post_scores = recommend_posts_for_user(user_id)
+        content_data, collaborative_data = load_data_from_db()
 
-        if not post_scores:
+        # Enrich content_data
+        enriched_content_data = enrich_content_data(content_data)
+
+        # Load pre-trained models
+        collaborative_model = joblib.load('Collaborative_Model.pkl')
+        cosine_sim = joblib.load('Cosine_Similarity.pkl')
+
+        categories = [
+            'Gadget', 'Smartphone', 'Laptop', 'Smartwatch', 'Headphone', 'Tablet', 'Camera', 'Drone',
+            'Home_Appliance', 'Gaming_Console', 'Wearable_Device', 'Fitness_Tracker', 'VR_Headset',
+            'Smart_Home', 'Power_Bank', 'Bluetooth_Speaker', 'Action_Camera', 'E_Reader',
+            'Desktop_Computer', 'Projector'
+        ]
+
+        # Recommend posts
+        recommendations = recommend_hybrid(user_id, enriched_content_data, collaborative_data, collaborative_model, cosine_sim, categories, alpha=0.9)
+
+        if not recommendations:
             return jsonify({"error": "No recommendations found"}), 404
 
-        # เตรียม post_ids จาก post_scores
-        post_ids = [post_id for post_id, _ in post_scores]
+        # กรองโพสต์ที่เคยมีปฏิสัมพันธ์ออกจากการ Query รายละเอียด
+        unique_recommendations = [post_id for post_id in recommendations if post_id not in collaborative_data[collaborative_data['user_id'] == user_id]['post_id'].tolist()]
 
-        # ตรวจสอบว่า post_ids ถูกต้อง
-        print("Post IDs for database query:", post_ids)
-
-        placeholders = ', '.join([f':id_{i}' for i in range(len(post_ids))])
+        # Query for post details
+        placeholders = ', '.join([f':id_{i}' for i in range(len(unique_recommendations))])
         query = text(f"""
-            SELECT posts.*, users.username, users.picture, 
+            SELECT posts.*, users.username, users.picture,
                    (SELECT COUNT(*) FROM likes WHERE post_id = posts.id AND user_id = :user_id) AS is_liked
             FROM posts 
             JOIN users ON posts.user_id = users.id
             WHERE posts.status = 'active' AND posts.id IN ({placeholders})
         """)
 
-        params = {'user_id': user_id, **{f'id_{i}': post_id for i, post_id in enumerate(post_ids)}}
+        params = {'user_id': user_id, **{f'id_{i}': post_id for i, post_id in enumerate(unique_recommendations)}}
         result = db.session.execute(query, params).fetchall()
         posts = [row._mapping for row in result]
 
-        # ใช้ post_scores เพื่อจัดเรียงโพสต์ตามคะแนน
-        sorted_posts = sorted(posts, key=lambda x: post_scores[post_ids.index(x['id'])][1], reverse=True)
-
-        recommendations = []
-        for post in sorted_posts:
-            recommendations.append({
+        output = []
+        for post in posts:
+            output.append({
                 "id": post['id'],
                 "userId": post['user_id'],
                 "title": post['Title'],
@@ -334,17 +352,14 @@ def recommend():
                 "is_liked": post['is_liked'] > 0
             })
 
-        return jsonify(recommendations)
+        return jsonify(output)
 
     except Exception as e:
         print("Error in recommend function:", e)
         return jsonify({"error": "Internal Server Error"}), 500
 
 
-
 if __name__ == '__main__':
-    try:
         app.run(host='0.0.0.0', port=5005)
 
-    finally:
-        driver.quit()
+ 
