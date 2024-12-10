@@ -27,6 +27,10 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from surprise import SVD, Dataset, Reader
 from functools import wraps
+import threading
+import time
+from flask import Flask, jsonify
+from sqlalchemy.sql import text
 
 
 
@@ -296,6 +300,21 @@ def recommend_hybrid(user_id, data, collaborative_data, collaborative_model, cos
 # เพิ่มตัวแปรในหน่วยความจำเพื่อเก็บโพสต์แนะนำที่สร้างล่าสุด
 user_recommendations_cache = {}
 
+# ฟังก์ชันสำหรับล้าง cache ทุกๆ `interval` วินาที
+def clear_cache_periodically(interval=3600):
+    def clear_cache():
+        global user_recommendations_cache
+        print("Clearing user recommendations cache...")
+        user_recommendations_cache = {}
+
+    while True:
+        time.sleep(interval)
+        clear_cache()
+
+# เริ่ม Thread สำหรับล้าง cache ทุกๆ 1 ชั่วโมง
+cache_clear_thread = threading.Thread(target=clear_cache_periodically, args=(3600,), daemon=True)
+cache_clear_thread.start()
+
 @app.route('/ai/recommend', methods=['POST'])
 @verify_token
 def recommend():
@@ -377,7 +396,6 @@ def recommend():
     except Exception as e:
         print("Error in recommend function:", e)
         return jsonify({"error": "Internal Server Error"}), 500
-
 
 if __name__ == '__main__':
         app.run(host='0.0.0.0', port=5005)
