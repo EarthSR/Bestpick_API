@@ -46,9 +46,9 @@ chrome_options.add_argument("--window-size=1920x1080")  # ตั้งขนา�
 chrome_options.add_argument("--log-level=3")  # ลดการแสดง log
 chrome_driver_path = os.path.join(os.getcwd(), "chromedriver", "chromedriver.exe")
 chrome_service = Service(chrome_driver_path)
-# chrome_service = Service('/usr/bin/chromedriver')
+chrome_service = Service('/usr/bin/chromedriver')
 # สร้าง ChromeDriver ด้วย service และ options
-driver = webdriver.Chrome(service=chrome_service, options=chrome_options)
+#driver = webdriver.Chrome(service=chrome_service, options=chrome_options)
 
 # Filter products by name to match search term
 def filter_products_by_name(products, search_name):
