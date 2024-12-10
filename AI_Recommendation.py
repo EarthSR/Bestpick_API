@@ -113,15 +113,11 @@ def create_content_based_model(data, text_column='Content', comment_column='Comm
     joblib.dump(cosine_sim, 'Cosine_Similarity.pkl')
     return tfidf, cosine_sim, data
 
-def recommend_hybrid(user_id, data, collaborative_data, collaborative_model, cosine_sim, categories, alpha=0.9):
+def recommend_hybrid(user_id, data, collaborative_model, cosine_sim, categories, alpha=0.9):
     """แนะนำโพสต์โดยใช้ Hybrid Filtering รวม Collaborative และ Content-Based"""
     if not (0 <= alpha <= 1):
         raise ValueError("Alpha ต้องอยู่ในช่วง 0 ถึง 1")
 
-    # ค้นหาโพสต์ที่ผู้ใช้เคยมีปฏิสัมพันธ์
-    user_interactions = collaborative_data[collaborative_data['user_id'] == user_id]['post_id'].tolist()
-
-    # ลบโพสต์ที่ user_id หรือ owner_id ที่เกี่ยวข้อง
     interacted_posts = data[data['owner_id'] == user_id]['post_id'].tolist()
     unviewed_data = data[~data['post_id'].isin(interacted_posts)]
 
@@ -148,17 +144,7 @@ def recommend_hybrid(user_id, data, collaborative_data, collaborative_model, cos
 
     recommendations_df = pd.DataFrame(recommendations, columns=['post_id', 'score'])
     recommendations_df['normalized_score'] = normalize_scores(recommendations_df['score'])
-
-    # แยกโพสต์ที่ผู้ใช้เคยปฏิสัมพันธ์
-    interacted_df = recommendations_df[recommendations_df['post_id'].isin(user_interactions)]
-    new_posts_df = recommendations_df[~recommendations_df['post_id'].isin(user_interactions)]
-
-    # เรียงลำดับใหม่: โพสต์ใหม่ก่อน โพสต์ที่เคยมีปฏิสัมพันธ์ทีหลัง
-    new_posts_df = new_posts_df.sort_values(by='normalized_score', ascending=False)
-    interacted_df = interacted_df.sort_values(by='normalized_score', ascending=False)
-
-    # รวมผลลัพธ์
-    recommendations = pd.concat([new_posts_df, interacted_df])['post_id'].tolist()
+    recommendations = recommendations_df.sort_values(by='normalized_score', ascending=False)['post_id'].tolist()
 
     return recommendations
 
@@ -235,7 +221,7 @@ def main():
     results = []
     all_tp, all_fp, all_fn = [], [], []
 
-    for _ in range(10):  # รันซ้ำ 5 รอบเพื่อความเสถียร
+    for _ in range(5):  # รันซ้ำ 5 รอบเพื่อความเสถียร
         for user_id in user_ids:
             recommendations = recommend_hybrid(user_id, enriched_content_data, collaborative_model, cosine_sim, categories, alpha=0.9)
             precision, recall, f1, tp, fp, fn = evaluate_model(enriched_content_data, recommendations)
