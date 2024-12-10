@@ -302,10 +302,9 @@ def recommend():
     try:
         user_id = request.user_id
 
-        # หากมี cache อยู่แล้วสำหรับ user นี้ ให้ใช้ cache เดิม
+        # หากมี Cache อยู่แล้ว ให้ใช้ Cache เดิม
         if user_id in user_recommendations_cache:
-            cached_recommendations = user_recommendations_cache[user_id]
-            return jsonify(cached_recommendations)
+            return jsonify(user_recommendations_cache[user_id])
 
         # โหลดข้อมูลจากฐานข้อมูล
         content_data, collaborative_data = load_data_from_db()
@@ -324,7 +323,7 @@ def recommend():
             'Desktop_Computer', 'Projector'
         ]
 
-        # Recommend posts
+        # คำนวณคำแนะนำใหม่
         recommendations = recommend_hybrid(user_id, enriched_content_data, collaborative_data, collaborative_model, cosine_sim, categories, alpha=0.9)
 
         if not recommendations:
@@ -370,7 +369,7 @@ def recommend():
                 "is_liked": post['is_liked'] > 0
             })
 
-        # เก็บผลลัพธ์ลง cache
+        # เก็บผลลัพธ์ใหม่ลง Cache
         user_recommendations_cache[user_id] = output
 
         return jsonify(output)
