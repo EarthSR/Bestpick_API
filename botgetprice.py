@@ -166,7 +166,7 @@ def search_product():
     return jsonify(results)
 
 # Configure your database URI
-app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+mysqlconnector://root:1234@localhost/reviewapp'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+mysqlconnector://bestpick_user:bestpick7890@localhost/reviewapp'
 
 # Initialize the SQLAlchemy object
 db = SQLAlchemy(app)
@@ -198,7 +198,7 @@ def verify_token(f):
     return decorated_function
 
 def load_data_from_db():
-    engine = create_engine('mysql+mysqlconnector://root:1234@localhost/reviewapp')
+    engine = create_engine('mysql+mysqlconnector://bestpick_user:bestpick7890@localhost/reviewapp')
     query_content = "SELECT * FROM contentbasedview;"
     query_collaborative = "SELECT * FROM collaborativeview;"
 
