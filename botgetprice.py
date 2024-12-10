@@ -45,10 +45,10 @@ chrome_options.add_argument("--disable-dev-shm-usage")  # ลดการใช�
 chrome_options.add_argument("--window-size=1920x1080")  # ตั้งขนาดหน้าต่าง
 chrome_options.add_argument("--log-level=3")  # ลดการแสดง log
 chrome_driver_path = os.path.join(os.getcwd(), "chromedriver", "chromedriver.exe")
-chrome_service = Service(chrome_driver_path)
+# chrome_service = Service(chrome_driver_path)
 chrome_service = Service('/usr/bin/chromedriver')
 # สร้าง ChromeDriver ด้วย service และ options
-#driver = webdriver.Chrome(service=chrome_service, options=chrome_options)
+driver = webdriver.Chrome(service=chrome_service, options=chrome_options)
 
 # Filter products by name to match search term
 def filter_products_by_name(products, search_name):
@@ -173,42 +173,27 @@ tfidf = joblib.load('tfidf_model.pkl')
 tfidf_matrix = joblib.load('tfidf_matrix.pkl')
 cosine_sim = joblib.load('cosine_similarity.pkl')
 
-# ฟังก์ชันสำหรับโหลดข้อมูลจากฐานข้อมูลและจัดการกับ NaN หรือ None
+# ฟังก์ชันสำหรับโหลดข้อมูลจากฐานข้อมูล
 def load_data_from_db():
     engine = create_engine('mysql+mysqlconnector://bestpick_user:bestpick7890@localhost/reviewapp')
     query = "SELECT * FROM clean_new_view;"
-    data = pd.read_sql(query, con=engine)
-
-    # ตรวจสอบและกรองค่า NaN หรือ None ที่สำคัญ
-    data['post_id'] = data['post_id'].dropna()  # ลบแถวที่มี post_id เป็น NaN
-    data['total_interaction_score'] = data['total_interaction_score'].fillna(data['total_interaction_score'].mean())  # เติมค่า NaN ด้วยค่าเฉลี่ย
-    data['updated_at'] = pd.to_datetime(data['updated_at'], errors='coerce')  # เปลี่ยนค่า updated_at ที่ไม่สามารถแปลงเป็นวันที่เป็น NaT (Not a Time)
-
-    # กรองแถวที่ updated_at เป็น NaT
-    data = data.dropna(subset=['updated_at'])
-
-    # ตรวจสอบว่า column อื่น ๆ ที่เกี่ยวข้องมีค่า NaN หรือไม่
-    data = data.dropna(subset=['total_interaction_score'])  # ลบแถวที่มี total_interaction_score เป็น NaN
-
-    return data
-
-
+    return pd.read_sql(query, con=engine)
 
 # ฟังก์ชัน Hybrid สำหรับแนะนำโพสต์
-def hybrid_recommendations(user_id, post_id, alpha=0.85, collaborative_model=None, cosine_sim=None, data=None):
+def hybrid_recommendations(user_id, post_id, alpha=0.85):
     # คาดการณ์จาก Collaborative Filtering
     collab_pred = collaborative_model.predict(user_id, post_id).est
     
     # เรียกใช้ Content-Based Recommendations
-    content_recs = content_based_recommendations(post_id, user_id, cosine_sim, data)
+    content_recs = content_based_recommendations(post_id, user_id)
     content_pred = 0.5 if post_id in content_recs else 0
     
     # คำนวณคะแนนสุดท้ายโดยให้น้ำหนักกับ Collaborative Filtering มากกว่า
     final_score = alpha * collab_pred + (1 - alpha) * content_pred
     return {"post_id": post_id, "final_score": final_score}
-
 # ฟังก์ชันสำหรับแนะนำโพสต์ตามเนื้อหาที่คล้ายกัน
-def content_based_recommendations(post_id, user_id, cosine_sim, data):
+def content_based_recommendations(post_id, user_id):
+    data = load_data_from_db()  # โหลดข้อมูลใหม่ทุกครั้ง
     try:
         idx = data.index[data['post_id'] == post_id][0]
         sim_scores = list(enumerate(cosine_sim[idx]))
@@ -221,9 +206,8 @@ def content_based_recommendations(post_id, user_id, cosine_sim, data):
     except IndexError:
         return []
 
-
 # ฟังก์ชันสำหรับคำนวณคะแนนการแนะนำโพสต์ทั้งหมดสำหรับผู้ใช้
-def recommend_posts_for_user(user_id, collaborative_model, cosine_sim, alpha=0.7):
+def recommend_posts_for_user(user_id, alpha=0.7):
     data = load_data_from_db()  # โหลดข้อมูลใหม่ทุกครั้ง
 
     # ลบโพสต์ที่มี post_id ซ้ำใน DataFrame
@@ -234,7 +218,7 @@ def recommend_posts_for_user(user_id, collaborative_model, cosine_sim, alpha=0.7
 
     # วนผ่านโพสต์ทั้งหมดเพื่อคำนวณคะแนนการแนะนำ
     for post_id in data['post_id'].unique():
-        score = hybrid_recommendations(user_id, post_id, alpha=alpha, collaborative_model=collaborative_model, cosine_sim=cosine_sim, data=data)
+        score = hybrid_recommendations(user_id, post_id, alpha=alpha)
         final_score = float(score['final_score'])
 
         # เพิ่มคะแนนสำหรับโพสต์ใหม่ (ถ้ามีคอลัมน์ updated_at)
@@ -258,35 +242,6 @@ def recommend_posts_for_user(user_id, collaborative_model, cosine_sim, alpha=0.7
     recommended_posts = top_posts + remaining_posts
 
     return recommended_posts
-
-
-
-# ฟังก์ชันสำหรับผู้ใช้ใหม่ที่ไม่มีประวัติการโต้ตอบ (Cold Start)
-def cold_start_recommendations(data, top_n=5):
-    """
-    สำหรับผู้ใช้ใหม่ที่ไม่มีประวัติการโต้ตอบ ให้แนะนำโพสต์ที่ได้รับความนิยมสูงสุด
-    """
-    # คำนวณยอดโต้ตอบรวมของโพสต์ทั้งหมด
-    popular_posts = data.groupby('post_id')['total_interaction_score'].sum().sort_values(ascending=False).head(top_n)
-    return popular_posts
-
-# ฟังก์ชันสำหรับการแนะนำโพสต์สำหรับผู้ใช้ใหม่
-def get_recommendations_for_new_user(user_id, data, collaborative_model, cosine_sim):
-    """
-    ฟังก์ชันนี้จะใช้สำหรับผู้ใช้ใหม่ที่ไม่มีประวัติการโต้ตอบ
-    จะใช้โพสต์ที่ได้รับความนิยมสูงสุดจาก Cold Start
-    """
-    # แนะนำโพสต์ที่ได้รับความนิยมสูงสุดจาก Cold Start
-    top_posts = cold_start_recommendations(data, top_n=5)
-    
-    recommendations = []
-    for post_id in top_posts.index:
-        # คำนวณคะแนนจากโมเดล Hybrid
-        rec = hybrid_recommendations(user_id, post_id, collaborative_model=collaborative_model, cosine_sim=cosine_sim, data=data)
-        recommendations.append(rec)
-    
-    return recommendations
-
 
 
 
