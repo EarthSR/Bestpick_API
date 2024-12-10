@@ -293,11 +293,21 @@ def recommend_hybrid(user_id, data, collaborative_data, collaborative_model, cos
 
     return recommendations
 
+# เพิ่มตัวแปรในหน่วยความจำเพื่อเก็บโพสต์แนะนำที่สร้างล่าสุด
+user_recommendations_cache = {}
+
 @app.route('/ai/recommend', methods=['POST'])
 @verify_token
 def recommend():
     try:
         user_id = request.user_id
+
+        # หากมี cache อยู่แล้วสำหรับ user นี้ ให้ใช้ cache เดิม
+        if user_id in user_recommendations_cache:
+            cached_recommendations = user_recommendations_cache[user_id]
+            return jsonify(cached_recommendations)
+
+        # โหลดข้อมูลจากฐานข้อมูล
         content_data, collaborative_data = load_data_from_db()
 
         # Enrich content_data
@@ -325,7 +335,7 @@ def recommend():
         new_recommendations = [post_id for post_id in recommendations if post_id not in user_interactions]
         interacted_recommendations = [post_id for post_id in recommendations if post_id in user_interactions]
 
-        # **รวมโพสต์ใหม่กับโพสต์ที่เคยมีปฏิสัมพันธ์ โดยยังรักษาโพสต์ที่มีปฏิสัมพันธ์ในตำแหน่งเดิม**
+        # รวมโพสต์ใหม่และโพสต์ที่เคยมีปฏิสัมพันธ์
         unique_recommendations = new_recommendations + interacted_recommendations
 
         # Query for post details
@@ -359,6 +369,9 @@ def recommend():
                 "userProfileUrl": post['picture'],
                 "is_liked": post['is_liked'] > 0
             })
+
+        # เก็บผลลัพธ์ลง cache
+        user_recommendations_cache[user_id] = output
 
         return jsonify(output)
 
