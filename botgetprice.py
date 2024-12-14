@@ -1,37 +1,52 @@
-from flask import Flask, request, jsonify
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
-from bs4 import BeautifulSoup
+
 import requests
 import time
 import os
 import threading
 import re
 import traceback
-from datetime import datetime, timezone
 import json
 import joblib
 import pandas as pd
-from sqlalchemy import create_engine
-from sqlalchemy.sql import text
-from flask_sqlalchemy import SQLAlchemy
 import jwt
-from functools import wraps
-from dotenv import load_dotenv
 import random
 import sys
 import pickle
+import threading
+import time
+import matplotlib.pyplot as plt
+import seaborn as sns
+import pandas as pd
+import joblib
+import numpy as np
+
+from datetime import datetime, timezone
+from sqlalchemy import create_engine
+from sqlalchemy.sql import text
+from flask_sqlalchemy import SQLAlchemy
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.model_selection import train_test_split
+from sklearn.neighbors import NearestNeighbors
+from pythainlp.tokenize import word_tokenize
+from sklearn.metrics import confusion_matrix
+from surprise import SVD, Dataset, Reader
+from sqlalchemy import create_engine
+from textblob import TextBlob
+from flask import Flask, jsonify
+from sqlalchemy.sql import text
 from pythainlp import word_tokenize
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from surprise import SVD, Dataset, Reader
 from functools import wraps
-import threading
-import time
-from flask import Flask, jsonify
-from sqlalchemy.sql import text
-
+from functools import wraps
+from dotenv import load_dotenv
+from flask import Flask, request, jsonify
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+from bs4 import BeautifulSoup
 
 
 app = Flask(__name__)
@@ -45,10 +60,10 @@ chrome_options.add_argument("--disable-dev-shm-usage")  # ลดการใช�
 chrome_options.add_argument("--window-size=1920x1080")  # ตั้งขนาดหน้าต่าง
 chrome_options.add_argument("--log-level=3")  # ลดการแสดง log
 chrome_driver_path = os.path.join(os.getcwd(), "chromedriver", "chromedriver.exe")
-# chrome_service = Service(chrome_driver_path)
-chrome_service = Service('/usr/bin/chromedriver')
-# สร้าง ChromeDriver ด้วย service และ options
-driver = webdriver.Chrome(service=chrome_service, options=chrome_options)
+chrome_service = Service(chrome_driver_path)
+#chrome_service = Service('/usr/bin/chromedriver')
+#สร้าง ChromeDriver ด้วย service และ options
+#driver = webdriver.Chrome(service=chrome_service, options=chrome_options)
 
 # Filter products by name to match search term
 def filter_products_by_name(products, search_name):
@@ -198,14 +213,22 @@ def verify_token(f):
     return decorated_function
 
 def load_data_from_db():
-    engine = create_engine('mysql+mysqlconnector://bestpick_user:bestpick7890@localhost/reviewapp')
-    query_content = "SELECT * FROM contentbasedview;"
-    query_collaborative = "SELECT * FROM collaborativeview;"
-
-    content_data = pd.read_sql(query_content, con=engine)
-    collaborative_data = pd.read_sql(query_collaborative, con=engine)
-
-    return content_data, collaborative_data
+    """โหลดข้อมูลจากฐานข้อมูล MySQL และส่งคืนเป็น DataFrame"""
+    try:
+        engine = create_engine('mysql+mysqlconnector://bestpick_user:bestpick7890@localhost/reviewapp')
+        
+        query_content = "SELECT * FROM contentbasedview;"
+        content_based_data = pd.read_sql(query_content, con=engine)
+        print("โหลดข้อมูล Content-Based สำเร็จ")
+        
+        query_collaborative = "SELECT * FROM collaborativeview;"
+        collaborative_data = pd.read_sql(query_collaborative, con=engine)
+        print("โหลดข้อมูล Collaborative สำเร็จ")
+        
+        return content_based_data, collaborative_data
+    except Exception as e:
+        print(f"ข้อผิดพลาดในการโหลดข้อมูลจากฐานข้อมูล: {str(e)}")
+        raise
 
 def normalize_scores(series):
     """ทำให้คะแนนอยู่ในช่วง [0, 1]"""
@@ -214,8 +237,8 @@ def normalize_scores(series):
         return (series - min_val) / (max_val - min_val)
     return series
 
-def normalize_engagement(data, user_column='owner_id', engagement_column='WeightedEngagement'):
-    """ปรับ Engagement ให้เหมาะสมตามผู้ใช้แต่ละคน"""
+def normalize_engagement(data, user_column='owner_id', engagement_column='PostEngagement'):
+    """ปรับ Engagement ให้เหมาะสมตามผู้ใช้แต่ละคนให้อยู่ในช่วง [0, 1]"""
     data['NormalizedEngagement'] = data.groupby(user_column)[engagement_column].transform(lambda x: normalize_scores(x))
     return data
 
@@ -227,81 +250,141 @@ def analyze_comments(comments):
             if pd.isna(comment):
                 sentiment_scores.append(0)
             else:
-                # ตรวจสอบว่าเป็นภาษาไทยหรือไม่
+                # หากเป็นภาษาไทย ให้ tokenize ด้วย PyThaiNLP
                 if any('\u0E00' <= char <= '\u0E7F' for char in comment):
                     tokenized_comment = ' '.join(word_tokenize(comment, engine='newmm'))
                 else:
                     tokenized_comment = comment
 
+                # คำนวณ Sentiment ด้วย TextBlob
                 blob = TextBlob(tokenized_comment)
-                polarity = blob.sentiment.polarity  # ช่วงค่า -1 ถึง 1
+                polarity = blob.sentiment.polarity
+                
+                # กำหนด Sentiment Score
                 if polarity > 0.5:
-                    sentiment_scores.append(3)
+                    sentiment_scores.append(1)  # Sentiment บวก
                 elif 0 < polarity <= 0.5:
-                    sentiment_scores.append(1)
+                    sentiment_scores.append(0.5)  # Sentiment บวก
                 elif -0.5 <= polarity < 0:
-                    sentiment_scores.append(-1)
+                    sentiment_scores.append(-0.5)  # Sentiment ลบ
                 else:
-                    sentiment_scores.append(-3)
+                    sentiment_scores.append(-1)  # Sentiment ลบ
+                    
         except Exception as e:
-            sentiment_scores.append(0)
+            sentiment_scores.append(0)  # หากเกิดข้อผิดพลาด ให้คะแนนเป็น 0
     return sentiment_scores
 
-def enrich_content_data(content_data):
-    """เพิ่มข้อมูลที่จำเป็นสำหรับ Content-Based Filtering"""
-    content_data['SentimentScore'] = analyze_comments(content_data['Comments'])
-    content_data['WeightedEngagement'] = 0.75 * content_data['PostEngagement'] + \
-                                         0.25 * normalize_scores(pd.Series(content_data['SentimentScore']))
-    content_data = normalize_engagement(content_data)
-    return content_data
+def create_content_based_model(data, text_column='Content', comment_column='Comments', engagement_column='PostEngagement'):
+    """สร้างโมเดล Content-Based Filtering ด้วย TF-IDF และ KNN พร้อมแบ่งข้อมูล"""
+    required_columns = [text_column, comment_column, engagement_column]
+    if not all(col in data.columns for col in required_columns):
+        raise ValueError(f"ข้อมูลขาดคอลัมน์ที่จำเป็น: {set(required_columns) - set(data.columns)}")
 
-def recommend_hybrid(user_id, data, collaborative_data, collaborative_model, cosine_sim, categories, alpha=0.9):
-    """แนะนำโพสต์โดยใช้ Hybrid Filtering รวม Collaborative และ Content-Based"""
+    # แบ่งข้อมูลเป็น train และ test
+    train_data, test_data = train_test_split(data, test_size=0.25, random_state=42)
+
+    # ใช้ TF-IDF เพื่อแปลงเนื้อหาของโพสต์เป็นเวกเตอร์
+    tfidf = TfidfVectorizer(stop_words='english', max_features=6000, ngram_range=(1, 3), min_df=1, max_df=0.8)
+    tfidf_matrix = tfidf.fit_transform(train_data[text_column].fillna(''))
+
+    # ใช้ KNN เพื่อหาความคล้ายคลึงระหว่างโพสต์
+    knn = NearestNeighbors(n_neighbors=10, metric='cosine')
+    knn.fit(tfidf_matrix)
+
+    # วิเคราะห์ความรู้สึกจากความคิดเห็นใน train และ test sets
+    train_data['SentimentScore'] = analyze_comments(train_data[comment_column])
+    test_data['SentimentScore'] = analyze_comments(test_data[comment_column])
+
+    # ปรับ Engagement ใน train set
+    train_data = normalize_engagement(train_data)
+    train_data['NormalizedEngagement'] = normalize_scores(train_data[engagement_column])
+    train_data['WeightedEngagement'] = train_data['NormalizedEngagement'] + train_data['SentimentScore']
+
+    # ปรับ Engagement ใน test set (กรณีใช้ในการประเมิน)
+    test_data = normalize_engagement(test_data)
+
+    joblib.dump(tfidf, 'TFIDF_Model.pkl')
+    joblib.dump(knn, 'KNN_Model.pkl')
+    return tfidf, knn, train_data, test_data
+
+def create_collaborative_model(data, n_factors=150, n_epochs=70, lr_all=0.005, reg_all=0.5):
+    """สร้างและฝึกโมเดล Collaborative Filtering พร้อมแบ่งข้อมูลเป็น training และ test set"""
+    required_columns = ['user_id', 'post_id']
+    if not all(col in data.columns for col in required_columns):
+        raise ValueError(f"ข้อมูลขาดคอลัมน์ที่จำเป็น: {set(required_columns) - set(data.columns)}")
+
+    melted_data = data.melt(id_vars=['user_id', 'post_id'], var_name='category', value_name='score')
+    melted_data = melted_data[melted_data['score'] > 0]
+
+    train_data, test_data = train_test_split(melted_data, test_size=0.25, random_state=42)
+
+    reader = Reader(rating_scale=(melted_data['score'].min(), melted_data['score'].max()))
+    trainset = Dataset.load_from_df(train_data[['user_id', 'post_id', 'score']], reader).build_full_trainset()
+
+    model = SVD(n_factors=n_factors, n_epochs=n_epochs, lr_all=lr_all, reg_all=reg_all)
+    model.fit(trainset)
+
+    joblib.dump(model, 'Collaborative_Model.pkl')
+    return model, test_data
+
+def recommend_hybrid(user_id, train_data, test_data, collaborative_model, knn, categories, tfidf, alpha=0.50):
+
+    
+    """แนะนำโพสต์โดยใช้ Hybrid Filtering รวม Collaborative และ Content-Based โดยคำนึงถึง test set"""
     if not (0 <= alpha <= 1):
         raise ValueError("Alpha ต้องอยู่ในช่วง 0 ถึง 1")
 
-    user_interactions = collaborative_data[collaborative_data['user_id'] == user_id]['post_id'].tolist()
-    interacted_posts = data[data['owner_id'] == user_id]['post_id'].tolist()
-    unviewed_data = data[~data['post_id'].isin(interacted_posts)]
+    # ขั้นแรก: หาข้อมูลโพสต์ที่ผู้ใช้เคยโต้ตอบแล้วใน train set
+    interacted_posts = train_data[train_data['owner_id'] == user_id]['post_id'].tolist()
+
+    # ข้อมูลโพสต์ที่ยังไม่ได้ดูใน test set
+    unviewed_data = test_data[~test_data['post_id'].isin(interacted_posts)]
 
     recommendations = []
+
+    # ขั้นที่สอง: ใช้หมวดหมู่ในการเลือกโพสต์ที่แนะนำ
     for category in categories:
         category_data = unviewed_data[unviewed_data[category] == 1]
-        for _, post in category_data.iterrows():
-            collab_score = collaborative_model.predict(user_id, post['post_id']).est
-            collab_normalized = normalize_scores(pd.Series([collab_score])).iloc[0]
 
-            idx = data.index[data['post_id'] == post['post_id']].tolist()
+        # ถ้าไม่มีโพสต์ในหมวดหมู่นั้น ๆ ให้ข้ามไป
+        if category_data.empty:
+            continue
+        
+        for _, post in category_data.iterrows():
+            # Collaborative Filtering: คำนวณคะแนนจากโมเดล Collaborative
+            collab_score = collaborative_model.predict(user_id, post['post_id']).est
+
+            # Content-Based Filtering: คำนวณคะแนนจากความคล้ายคลึงของเนื้อหา
+            idx = train_data.index[train_data['post_id'] == post['post_id']].tolist()
             content_score = 0
             if idx:
                 idx = idx[0]
-                sim_scores = list(enumerate(cosine_sim[idx]))
-                sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
-                content_score = sum(data.iloc[i[0]]['NormalizedEngagement'] for i in sim_scores[:20]) / 20
+                # แปลงเนื้อหาของโพสต์เป็นเวกเตอร์ TF-IDF
+                tfidf_vector = tfidf.transform([train_data.iloc[idx]['Content']])
+                
+                # ใช้ KNN เพื่อหาความคล้ายคลึงของโพสต์
+                n_neighbors = min(20, knn._fit_X.shape[0])
+                distances, indices = knn.kneighbors(tfidf_vector, n_neighbors=n_neighbors)
+                
+                # คำนวณคะแนนจากโพสต์ที่คล้ายกัน
+                content_score = np.mean([train_data.iloc[i]['NormalizedEngagement'] for i in indices[0]])
 
-            content_normalized = normalize_scores(pd.Series([content_score])).iloc[0]
-
-            final_score = alpha * collab_normalized + (1 - alpha) * content_normalized
+            # ผสมคะแนนจาก Collaborative และ Content-Based ตามค่า alpha
+            final_score = alpha * collab_score + (1 - alpha) * content_score
             recommendations.append((post['post_id'], final_score))
 
+    # จัดเรียงโพสต์ตามคะแนนที่ได้และคำนวณคะแนนที่เป็น normalized score
     recommendations_df = pd.DataFrame(recommendations, columns=['post_id', 'score'])
     recommendations_df['normalized_score'] = normalize_scores(recommendations_df['score'])
-
-    interacted_df = recommendations_df[recommendations_df['post_id'].isin(user_interactions)]
-    new_posts_df = recommendations_df[~recommendations_df['post_id'].isin(user_interactions)]
-
-    new_posts_df = new_posts_df.sort_values(by='normalized_score', ascending=False)
-    interacted_df = interacted_df.sort_values(by='normalized_score', ascending=False)
-
-    recommendations = pd.concat([new_posts_df, interacted_df])['post_id'].tolist()
+    recommendations = recommendations_df.sort_values(by='normalized_score', ascending=False)['post_id'].tolist()
 
     return recommendations
 
 # เพิ่มตัวแปรในหน่วยความจำเพื่อเก็บโพสต์แนะนำที่สร้างล่าสุด
 user_recommendations_cache = {}
 
-# ฟังก์ชันสำหรับล้าง cache ทุกๆ `interval` วินาที
-def clear_cache_periodically(interval=3600):
+# ฟังก์ชันสำหรับล้าง cache ทุกๆ 1 วินาที
+def clear_cache_periodically(interval=60):
     def clear_cache():
         global user_recommendations_cache
         print("Clearing user recommendations cache...")
@@ -311,8 +394,8 @@ def clear_cache_periodically(interval=3600):
         time.sleep(interval)
         clear_cache()
 
-# เริ่ม Thread สำหรับล้าง cache ทุกๆ 1 ชั่วโมง
-cache_clear_thread = threading.Thread(target=clear_cache_periodically, args=(3600,), daemon=True)
+# เริ่ม Thread สำหรับล้าง cache ทุกๆ 1 นาที
+cache_clear_thread = threading.Thread(target=clear_cache_periodically, args=(60,), daemon=True)
 cache_clear_thread.start()
 
 @app.route('/ai/recommend', methods=['POST'])
@@ -326,14 +409,20 @@ def recommend():
             return jsonify(user_recommendations_cache[user_id])
 
         # โหลดข้อมูลจากฐานข้อมูล
-        content_data, collaborative_data = load_data_from_db()
+        content_based_data, collaborative_data = load_data_from_db()
 
-        # Enrich content_data
-        enriched_content_data = enrich_content_data(content_data)
+        # สร้างคอลัมน์ 'NormalizedEngagement' หากยังไม่มี
+        if 'NormalizedEngagement' not in content_based_data.columns:
+            content_based_data = normalize_engagement(content_based_data, user_column='owner_id', engagement_column='PostEngagement')
 
         # Load pre-trained models
-        collaborative_model = joblib.load('Collaborative_Model.pkl')
-        cosine_sim = joblib.load('Cosine_Similarity.pkl')
+        try:
+            knn = joblib.load('KNN_Model.pkl')
+            collaborative_model = joblib.load('Collaborative_Model.pkl')
+            tfidf = joblib.load('TFIDF_Model.pkl')
+        except FileNotFoundError as e:
+            print(f"Error loading models: {e}")
+            return jsonify({"error": "Model files not found"}), 500
 
         categories = [
             'Gadget', 'Smartphone', 'Laptop', 'Smartwatch', 'Headphone', 'Tablet', 'Camera', 'Drone',
@@ -343,7 +432,10 @@ def recommend():
         ]
 
         # คำนวณคำแนะนำใหม่
-        recommendations = recommend_hybrid(user_id, enriched_content_data, collaborative_data, collaborative_model, cosine_sim, categories, alpha=0.9)
+        recommendations = recommend_hybrid(
+            user_id, content_based_data, collaborative_data,
+            collaborative_model, knn, categories, tfidf, alpha=0.9
+        )
 
         if not recommendations:
             return jsonify({"error": "No recommendations found"}), 404
@@ -393,11 +485,12 @@ def recommend():
 
         return jsonify(output)
 
+    except KeyError as e:
+        print(f"KeyError in recommend function: {e}")
+        return jsonify({"error": f"KeyError: {e}"}), 500
     except Exception as e:
         print("Error in recommend function:", e)
         return jsonify({"error": "Internal Server Error"}), 500
 
 if __name__ == '__main__':
         app.run(host='0.0.0.0', port=5005)
-
- 
