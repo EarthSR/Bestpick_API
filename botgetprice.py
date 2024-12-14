@@ -397,14 +397,14 @@ def split_and_rank_recommendations(recommendations, user_interactions):
 
 # Cache สำหรับเก็บคำแนะนำของผู้ใช้
 recommendation_cache = {}
-cache_expiry_time = 60  # หน่วยเป็นวินาที (1 นาที)
+cache_expiry_time = 10  # หน่วยเป็นวินาที (10 วินาที)
 
 # ฟังก์ชันสำหรับ clear cache
 def clear_cache():
-    """เคลียร์ cache ทุกๆ 1 นาที"""
+    """เคลียร์ cache ทุกๆ 10 วินาที"""
     global recommendation_cache
     while True:
-        time.sleep(cache_expiry_time)  # รอ 1 นาที
+        time.sleep(cache_expiry_time)  # รอ 10 วินาที
         recommendation_cache = {}
         print("Cache cleared automatically.")
 
