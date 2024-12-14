@@ -17,7 +17,7 @@ from textblob import TextBlob
 def load_data_from_db():
     """โหลดข้อมูลจากฐานข้อมูล MySQL และส่งคืนเป็น DataFrame"""
     try:
-        engine = create_engine('mysql+mysqlconnector://root:1234@localhost/reviewapp')
+        engine = create_engine('mysql+mysqlconnector://bestpick_user:bestpick7890@localhost/reviewapp')
         
         query_content = "SELECT * FROM contentbasedview;"
         content_based_data = pd.read_sql(query_content, con=engine)
