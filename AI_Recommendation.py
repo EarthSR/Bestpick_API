@@ -90,7 +90,7 @@ def create_content_based_model(data, text_column='Content', comment_column='Comm
     tfidf_matrix = tfidf.fit_transform(train_data[text_column].fillna(''))
 
     # ใช้ KNN เพื่อหาความคล้ายคลึงระหว่างโพสต์
-    knn = NearestNeighbors(n_neighbors=20, metric='cosine')
+    knn = NearestNeighbors(n_neighbors=10, metric='cosine')
     knn.fit(tfidf_matrix)
 
     # วิเคราะห์ความรู้สึกจากความคิดเห็นใน train และ test sets
@@ -130,9 +130,9 @@ def create_collaborative_model(data, n_factors=150, n_epochs=70, lr_all=0.005, r
     return model, test_data
 
 def recommend_hybrid(user_id, train_data, test_data, collaborative_model, knn, categories, tfidf, alpha=0.50):
-
-    
-    """แนะนำโพสต์โดยใช้ Hybrid Filtering รวม Collaborative และ Content-Based โดยคำนึงถึง test set"""
+    """
+    แนะนำโพสต์โดยใช้ Hybrid Filtering รวม Collaborative และ Content-Based โดยคำนึงถึง test set
+    """
     if not (0 <= alpha <= 1):
         raise ValueError("Alpha ต้องอยู่ในช่วง 0 ถึง 1")
 
@@ -142,16 +142,22 @@ def recommend_hybrid(user_id, train_data, test_data, collaborative_model, knn, c
     # ข้อมูลโพสต์ที่ยังไม่ได้ดูใน test set
     unviewed_data = test_data[~test_data['post_id'].isin(interacted_posts)]
 
+    # Debug: ตรวจสอบจำนวนโพสต์ที่ยังไม่ได้ดู
+    print("Unviewed Data:", len(unviewed_data))  # << ใส่ตรงนี้
+
     recommendations = []
 
     # ขั้นที่สอง: ใช้หมวดหมู่ในการเลือกโพสต์ที่แนะนำ
     for category in categories:
         category_data = unviewed_data[unviewed_data[category] == 1]
 
+        # Debug: ตรวจสอบจำนวนโพสต์ที่ตรงกับหมวดหมู่ใน unviewed_data
+        print(f"Category: {category}, Posts in category: {len(category_data)}")  # << Debug หมวดหมู่
+
         # ถ้าไม่มีโพสต์ในหมวดหมู่นั้น ๆ ให้ข้ามไป
         if category_data.empty:
             continue
-        
+
         for _, post in category_data.iterrows():
             # Collaborative Filtering: คำนวณคะแนนจากโมเดล Collaborative
             collab_score = collaborative_model.predict(user_id, post['post_id']).est
@@ -163,11 +169,11 @@ def recommend_hybrid(user_id, train_data, test_data, collaborative_model, knn, c
                 idx = idx[0]
                 # แปลงเนื้อหาของโพสต์เป็นเวกเตอร์ TF-IDF
                 tfidf_vector = tfidf.transform([train_data.iloc[idx]['Content']])
-                
+
                 # ใช้ KNN เพื่อหาความคล้ายคลึงของโพสต์
-                n_neighbors = min(50, knn._fit_X.shape[0])
+                n_neighbors = min(20, knn._fit_X.shape[0])
                 distances, indices = knn.kneighbors(tfidf_vector, n_neighbors=n_neighbors)
-                
+
                 # คำนวณคะแนนจากโพสต์ที่คล้ายกัน
                 content_score = np.mean([train_data.iloc[i]['NormalizedEngagement'] for i in indices[0]])
 
@@ -175,12 +181,16 @@ def recommend_hybrid(user_id, train_data, test_data, collaborative_model, knn, c
             final_score = alpha * collab_score + (1 - alpha) * content_score
             recommendations.append((post['post_id'], final_score))
 
+    # Debug: ตรวจสอบจำนวนคำแนะนำทั้งหมดที่สร้างได้
+    print("Recommendations:", len(recommendations))  # << ใส่ตรงนี้
+
     # จัดเรียงโพสต์ตามคะแนนที่ได้และคำนวณคะแนนที่เป็น normalized score
     recommendations_df = pd.DataFrame(recommendations, columns=['post_id', 'score'])
     recommendations_df['normalized_score'] = normalize_scores(recommendations_df['score'])
     recommendations = recommendations_df.sort_values(by='normalized_score', ascending=False)['post_id'].tolist()
 
     return recommendations
+
 
 def evaluate_relevant_items(data, engagement_threshold=0.5, sentiment_threshold=0):
     """กำหนดเกณฑ์ที่สมดุลมากขึ้นสำหรับ Relevant Items"""

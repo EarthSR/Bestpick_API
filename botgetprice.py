@@ -327,10 +327,16 @@ def create_collaborative_model(data, n_factors=150, n_epochs=70, lr_all=0.005, r
     joblib.dump(model, 'Collaborative_Model.pkl')
     return model, test_data
 
-def recommend_hybrid(user_id, train_data, test_data, collaborative_model, knn, tfidf, alpha=0.50):
-    """แนะนำโพสต์โดยใช้ Hybrid Filtering รวม Collaborative และ Content-Based"""
+def recommend_hybrid(user_id, train_data, test_data, collaborative_model, knn, tfidf, categories, alpha=0.50, beta=0.10):
+    """
+    แนะนำโพสต์โดยใช้ Hybrid Filtering รวม Collaborative, Content-Based และ Categories Adjustment
+    :param alpha: น้ำหนักของคะแนน Collaborative (0 ถึง 1)
+    :param beta: น้ำหนักของคะแนน Categories (0 ถึง 1)
+    """
     if not (0 <= alpha <= 1):
         raise ValueError("Alpha ต้องอยู่ในช่วง 0 ถึง 1")
+    if not (0 <= beta <= 1):
+        raise ValueError("Beta ต้องอยู่ในช่วง 0 ถึง 1")
 
     recommendations = []
 
@@ -349,14 +355,26 @@ def recommend_hybrid(user_id, train_data, test_data, collaborative_model, knn, t
             distances, indices = knn.kneighbors(tfidf_vector, n_neighbors=n_neighbors)
             content_score = np.mean([train_data.iloc[i]['NormalizedEngagement'] for i in indices[0]])
 
+        # Categories Adjustment
+        category_score = 0
+        if categories:
+            for category in categories:
+                if category in post and post[category] == 1:  # เช็คว่าหมวดหมู่ตรงหรือไม่
+                    category_score += 1
+
+        # Normalize Category Score
+        if categories:
+            category_score /= len(categories)
+
         # Hybrid Score
-        final_score = alpha * collab_score + (1 - alpha) * content_score
+        final_score = (alpha * collab_score) + ((1 - alpha) * content_score) + (beta * category_score)
         recommendations.append((post['post_id'], final_score))
 
-    # Normalized Score
+    # Normalize Scores
     recommendations_df = pd.DataFrame(recommendations, columns=['post_id', 'score'])
     recommendations_df['normalized_score'] = normalize_scores(recommendations_df['score'])
     return recommendations_df.sort_values(by='normalized_score', ascending=False)['post_id'].tolist()
+
 
 def split_and_rank_recommendations(recommendations, user_interactions):
     """แยกโพสต์ที่ผู้ใช้เคยโต้ตอบออกจากโพสต์ที่ยังไม่เคยดู และเรียงลำดับใหม่"""
@@ -399,10 +417,19 @@ def recommend():
             print(f"Error loading models: {e}")
             return jsonify({"error": "Model files not found"}), 500
 
+        # สร้างหมวดหมู่
+        categories = [
+            'Gadget', 'Smartphone', 'Laptop', 'Smartwatch', 'Headphone', 'Tablet', 'Camera', 'Drone',
+            'Home_Appliance', 'Gaming_Console', 'Wearable_Device', 'Fitness_Tracker', 'VR_Headset',
+            'Smart_Home', 'Power_Bank', 'Bluetooth_Speaker', 'Action_Camera', 'E_Reader',
+            'Desktop_Computer', 'Projector'
+        ]
+
         # คำนวณคำแนะนำใหม่
         recommendations = recommend_hybrid(
             user_id, content_based_data, collaborative_data,
-            collaborative_model, knn, tfidf, alpha=0.9
+            collaborative_model, knn, tfidf, categories,
+            alpha=0.9, beta=0.1  # เพิ่ม beta สำหรับ categories
         )
 
         if not recommendations:
@@ -452,6 +479,7 @@ def recommend():
     except Exception as e:
         print("Error in recommend function:", e)
         return jsonify({"error": "Internal Server Error"}), 500
+
 
 if __name__ == '__main__':
         app.run(host='0.0.0.0', port=5005)
