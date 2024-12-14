@@ -327,50 +327,37 @@ def create_collaborative_model(data, n_factors=150, n_epochs=70, lr_all=0.005, r
     joblib.dump(model, 'Collaborative_Model.pkl')
     return model, test_data
 
-def recommend_hybrid(user_id, train_data, test_data, collaborative_model, knn, categories, tfidf, alpha=0.50):
-    """แนะนำโพสต์โดยใช้ Hybrid Filtering รวม Collaborative และ Content-Based โดยไม่กรองโพสต์"""
+def recommend_hybrid(user_id, train_data, test_data, collaborative_model, knn, tfidf, alpha=0.50):
+    """แนะนำโพสต์โดยใช้ Hybrid Filtering รวม Collaborative และ Content-Based โดยไม่กรองตามหมวดหมู่"""
     if not (0 <= alpha <= 1):
         raise ValueError("Alpha ต้องอยู่ในช่วง 0 ถึง 1")
 
     recommendations = []
 
-    # ขั้นที่หนึ่ง: ใช้หมวดหมู่ในการเลือกโพสต์ที่แนะนำ
-    for category in categories:
-        category_data = test_data[test_data[category] == 1]  # ใช้ข้อมูลจาก test_data เท่านั้น
+    # ใช้ test_data ทั้งหมดโดยไม่กรองหมวดหมู่
+    for _, post in test_data.iterrows():
+        # Collaborative Filtering
+        collab_score = collaborative_model.predict(user_id, post['post_id']).est
 
-        # ถ้าไม่มีโพสต์ในหมวดหมู่นั้น ๆ ให้ข้ามไป
-        if category_data.empty:
-            continue
-        
-        for _, post in category_data.iterrows():
-            # Collaborative Filtering: คำนวณคะแนนจากโมเดล Collaborative
-            collab_score = collaborative_model.predict(user_id, post['post_id']).est
+        # Content-Based Filtering
+        idx = train_data.index[train_data['post_id'] == post['post_id']].tolist()
+        content_score = 0
+        if idx:
+            idx = idx[0]
+            tfidf_vector = tfidf.transform([train_data.iloc[idx]['Content']])
+            n_neighbors = min(20, knn._fit_X.shape[0])
+            distances, indices = knn.kneighbors(tfidf_vector, n_neighbors=n_neighbors)
+            content_score = np.mean([train_data.iloc[i]['NormalizedEngagement'] for i in indices[0]])
 
-            # Content-Based Filtering: คำนวณคะแนนจากความคล้ายคลึงของเนื้อหา
-            idx = train_data.index[train_data['post_id'] == post['post_id']].tolist()
-            content_score = 0
-            if idx:
-                idx = idx[0]
-                # แปลงเนื้อหาของโพสต์เป็นเวกเตอร์ TF-IDF
-                tfidf_vector = tfidf.transform([train_data.iloc[idx]['Content']])
-                
-                # ใช้ KNN เพื่อหาความคล้ายคลึงของโพสต์
-                n_neighbors = min(20, knn._fit_X.shape[0])
-                distances, indices = knn.kneighbors(tfidf_vector, n_neighbors=n_neighbors)
-                
-                # คำนวณคะแนนจากโพสต์ที่คล้ายกัน
-                content_score = np.mean([train_data.iloc[i]['NormalizedEngagement'] for i in indices[0]])
+        # Hybrid Score
+        final_score = alpha * collab_score + (1 - alpha) * content_score
+        recommendations.append((post['post_id'], final_score))
 
-            # ผสมคะแนนจาก Collaborative และ Content-Based ตามค่า alpha
-            final_score = alpha * collab_score + (1 - alpha) * content_score
-            recommendations.append((post['post_id'], final_score))
-
-    # จัดเรียงโพสต์ตามคะแนนที่ได้และคำนวณคะแนนที่เป็น normalized score
+    # Normalized Score
     recommendations_df = pd.DataFrame(recommendations, columns=['post_id', 'score'])
     recommendations_df['normalized_score'] = normalize_scores(recommendations_df['score'])
-    recommendations = recommendations_df.sort_values(by='normalized_score', ascending=False)['post_id'].tolist()
+    return recommendations_df.sort_values(by='normalized_score', ascending=False)['post_id'].tolist()
 
-    return recommendations
 
 def split_and_rank_recommendations(recommendations, user_interactions):
     """แยกโพสต์ที่ผู้ใช้เคยโต้ตอบออกจากโพสต์ที่ยังไม่เคยดู และเรียงลำดับใหม่"""
