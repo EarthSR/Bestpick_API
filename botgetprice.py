@@ -395,11 +395,32 @@ def split_and_rank_recommendations(recommendations, user_interactions):
 
     return final_recommendations
 
+# Cache สำหรับเก็บคำแนะนำของผู้ใช้
+recommendation_cache = {}
+cache_expiry_time = 60  # หน่วยเป็นวินาที (1 นาที)
+
+# ฟังก์ชันสำหรับ clear cache
+def clear_cache():
+    """เคลียร์ cache ทุกๆ 1 นาที"""
+    global recommendation_cache
+    while True:
+        time.sleep(cache_expiry_time)  # รอ 1 นาที
+        recommendation_cache = {}
+        print("Cache cleared automatically.")
+
+# สร้าง thread สำหรับ clear cache
+threading.Thread(target=clear_cache, daemon=True).start()
+
 @app.route('/ai/recommend', methods=['POST'])
 @verify_token
 def recommend():
     try:
         user_id = request.user_id
+
+        # หาก cache มีผลลัพธ์สำหรับ user_id นี้ ให้ใช้ผลลัพธ์จาก cache
+        if user_id in recommendation_cache:
+            print(f"Returning cached recommendations for user_id: {user_id}")
+            return jsonify(recommendation_cache[user_id])
 
         # โหลดข้อมูลจากฐานข้อมูล
         content_based_data, collaborative_data = load_data_from_db()
@@ -471,6 +492,9 @@ def recommend():
                 "is_liked": post['is_liked'] > 0
             })
 
+        # บันทึกผลลัพธ์ลงใน cache
+        recommendation_cache[user_id] = output
+
         return jsonify(output)
 
     except KeyError as e:
@@ -479,7 +503,6 @@ def recommend():
     except Exception as e:
         print("Error in recommend function:", e)
         return jsonify({"error": "Internal Server Error"}), 500
-
 
 if __name__ == '__main__':
         app.run(host='0.0.0.0', port=5005)
