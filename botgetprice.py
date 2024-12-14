@@ -327,7 +327,7 @@ def create_collaborative_model(data, n_factors=150, n_epochs=70, lr_all=0.005, r
     joblib.dump(model, 'Collaborative_Model.pkl')
     return model, test_data
 
-def recommend_hybrid(user_id, train_data, test_data, collaborative_model, knn, tfidf, categories, alpha=0.50, beta=0.10):
+def recommend_hybrid(user_id, train_data, test_data, collaborative_model, knn, tfidf, categories, alpha=0.50, beta=0.20):
     """
     แนะนำโพสต์โดยใช้ Hybrid Filtering รวม Collaborative, Content-Based และ Categories Adjustment
     :param alpha: น้ำหนักของคะแนน Collaborative (0 ถึง 1)
@@ -429,7 +429,7 @@ def recommend():
         recommendations = recommend_hybrid(
             user_id, content_based_data, collaborative_data,
             collaborative_model, knn, tfidf, categories,
-            alpha=0.9, beta=0.1  # เพิ่ม beta สำหรับ categories
+            alpha=0.8, beta=0.2  # เพิ่ม beta สำหรับ categories
         )
 
         if not recommendations:

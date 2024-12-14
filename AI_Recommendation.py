@@ -17,7 +17,7 @@ from textblob import TextBlob
 def load_data_from_db():
     """โหลดข้อมูลจากฐานข้อมูล MySQL และส่งคืนเป็น DataFrame"""
     try:
-        engine = create_engine('mysql+mysqlconnector://bestpick_user:bestpick7890@localhost/reviewapp')
+        engine = create_engine('mysql+mysqlconnector://root:1234@localhost/reviewapp')
         
         query_content = "SELECT * FROM contentbasedview;"
         content_based_data = pd.read_sql(query_content, con=engine)
@@ -142,17 +142,11 @@ def recommend_hybrid(user_id, train_data, test_data, collaborative_model, knn, c
     # ข้อมูลโพสต์ที่ยังไม่ได้ดูใน test set
     unviewed_data = test_data[~test_data['post_id'].isin(interacted_posts)]
 
-    # Debug: ตรวจสอบจำนวนโพสต์ที่ยังไม่ได้ดู
-    print("Unviewed Data:", len(unviewed_data))  # << ใส่ตรงนี้
-
     recommendations = []
 
     # ขั้นที่สอง: ใช้หมวดหมู่ในการเลือกโพสต์ที่แนะนำ
     for category in categories:
         category_data = unviewed_data[unviewed_data[category] == 1]
-
-        # Debug: ตรวจสอบจำนวนโพสต์ที่ตรงกับหมวดหมู่ใน unviewed_data
-        print(f"Category: {category}, Posts in category: {len(category_data)}")  # << Debug หมวดหมู่
 
         # ถ้าไม่มีโพสต์ในหมวดหมู่นั้น ๆ ให้ข้ามไป
         if category_data.empty:
@@ -180,9 +174,6 @@ def recommend_hybrid(user_id, train_data, test_data, collaborative_model, knn, c
             # ผสมคะแนนจาก Collaborative และ Content-Based ตามค่า alpha
             final_score = alpha * collab_score + (1 - alpha) * content_score
             recommendations.append((post['post_id'], final_score))
-
-    # Debug: ตรวจสอบจำนวนคำแนะนำทั้งหมดที่สร้างได้
-    print("Recommendations:", len(recommendations))  # << ใส่ตรงนี้
 
     # จัดเรียงโพสต์ตามคะแนนที่ได้และคำนวณคะแนนที่เป็น normalized score
     recommendations_df = pd.DataFrame(recommendations, columns=['post_id', 'score'])
