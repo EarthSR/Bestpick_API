@@ -181,7 +181,7 @@ def search_product():
     return jsonify(results)
 
 # Configure your database URI
-app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+mysqlconnector://bestpick_user:bestpick7890@localhost/reviewapp'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+mysqlconnector://root:1234@localhost/reviewapp'
 
 # Initialize the SQLAlchemy object
 db = SQLAlchemy(app)
@@ -215,7 +215,7 @@ def verify_token(f):
 def load_data_from_db():
     """โหลดข้อมูลจากฐานข้อมูล MySQL และส่งคืนเป็น DataFrame"""
     try:
-        engine = create_engine('mysql+mysqlconnector://bestpick_user:bestpick7890@localhost/reviewapp')
+        engine = create_engine('mysql+mysqlconnector://root:1234@localhost/reviewapp')
         
         query_content = "SELECT * FROM contentbasedview;"
         content_based_data = pd.read_sql(query_content, con=engine)
@@ -328,23 +328,15 @@ def create_collaborative_model(data, n_factors=150, n_epochs=70, lr_all=0.005, r
     return model, test_data
 
 def recommend_hybrid(user_id, train_data, test_data, collaborative_model, knn, categories, tfidf, alpha=0.50):
-
-    
-    """แนะนำโพสต์โดยใช้ Hybrid Filtering รวม Collaborative และ Content-Based โดยคำนึงถึง test set"""
+    """แนะนำโพสต์โดยใช้ Hybrid Filtering รวม Collaborative และ Content-Based โดยไม่กรองโพสต์"""
     if not (0 <= alpha <= 1):
         raise ValueError("Alpha ต้องอยู่ในช่วง 0 ถึง 1")
 
-    # ขั้นแรก: หาข้อมูลโพสต์ที่ผู้ใช้เคยโต้ตอบแล้วใน train set
-    interacted_posts = train_data[train_data['owner_id'] == user_id]['post_id'].tolist()
-
-    # ข้อมูลโพสต์ที่ยังไม่ได้ดูใน test set
-    unviewed_data = test_data[~test_data['post_id'].isin(interacted_posts)]
-
     recommendations = []
 
-    # ขั้นที่สอง: ใช้หมวดหมู่ในการเลือกโพสต์ที่แนะนำ
+    # ขั้นที่หนึ่ง: ใช้หมวดหมู่ในการเลือกโพสต์ที่แนะนำ
     for category in categories:
-        category_data = unviewed_data[unviewed_data[category] == 1]
+        category_data = test_data[test_data[category] == 1]  # ใช้ข้อมูลจาก test_data เท่านั้น
 
         # ถ้าไม่มีโพสต์ในหมวดหมู่นั้น ๆ ให้ข้ามไป
         if category_data.empty:
@@ -379,6 +371,16 @@ def recommend_hybrid(user_id, train_data, test_data, collaborative_model, knn, c
     recommendations = recommendations_df.sort_values(by='normalized_score', ascending=False)['post_id'].tolist()
 
     return recommendations
+
+def split_and_rank_recommendations(recommendations, user_interactions):
+    """แยกโพสต์ที่ผู้ใช้เคยโต้ตอบออกจากโพสต์ที่ยังไม่เคยดู และเรียงลำดับใหม่"""
+    # แยกโพสต์ที่ผู้ใช้ยังไม่เคยดู และโพสต์ที่ผู้ใช้เคยโต้ตอบแล้ว
+    unviewed_posts = [post_id for post_id in recommendations if post_id not in user_interactions]
+    viewed_posts = [post_id for post_id in recommendations if post_id in user_interactions]
+
+    # รวมโพสต์ที่ยังไม่เคยดู (unviewed) ก่อน ตามด้วยโพสต์ที่เคยดูแล้ว (viewed)
+    final_recommendations = unviewed_posts + viewed_posts
+    return final_recommendations
 
 # เพิ่มตัวแปรในหน่วยความจำเพื่อเก็บโพสต์แนะนำที่สร้างล่าสุด
 user_recommendations_cache = {}
@@ -431,7 +433,7 @@ def recommend():
             'Desktop_Computer', 'Projector'
         ]
 
-        # คำนวณคำแนะนำใหม่
+        # คำนวณคำแนะนำใหม่ (รวมโพสต์ทั้งหมด)
         recommendations = recommend_hybrid(
             user_id, content_based_data, collaborative_data,
             collaborative_model, knn, categories, tfidf, alpha=0.9
@@ -440,16 +442,12 @@ def recommend():
         if not recommendations:
             return jsonify({"error": "No recommendations found"}), 404
 
-        # แยกโพสต์ที่มีปฏิสัมพันธ์และโพสต์ใหม่
+        # แยกโพสต์ที่ผู้ใช้เคยโต้ตอบ และยังไม่เคยดู
         user_interactions = collaborative_data[collaborative_data['user_id'] == user_id]['post_id'].tolist()
-        new_recommendations = [post_id for post_id in recommendations if post_id not in user_interactions]
-        interacted_recommendations = [post_id for post_id in recommendations if post_id in user_interactions]
-
-        # รวมโพสต์ใหม่และโพสต์ที่เคยมีปฏิสัมพันธ์
-        unique_recommendations = new_recommendations + interacted_recommendations
+        final_recommendations = split_and_rank_recommendations(recommendations, user_interactions)
 
         # Query for post details
-        placeholders = ', '.join([f':id_{i}' for i in range(len(unique_recommendations))])
+        placeholders = ', '.join([f':id_{i}' for i in range(len(final_recommendations))])
         query = text(f"""
             SELECT posts.*, users.username, users.picture,
                    (SELECT COUNT(*) FROM likes WHERE post_id = posts.id AND user_id = :user_id) AS is_liked
@@ -458,12 +456,12 @@ def recommend():
             WHERE posts.status = 'active' AND posts.id IN ({placeholders})
         """)
 
-        params = {'user_id': user_id, **{f'id_{i}': post_id for i, post_id in enumerate(unique_recommendations)}}
+        params = {'user_id': user_id, **{f'id_{i}': post_id for i, post_id in enumerate(final_recommendations)}}
         result = db.session.execute(query, params).fetchall()
         posts = [row._mapping for row in result]
 
-        # ใช้ unique_recommendations เพื่อรักษาลำดับที่แนะนำ
-        sorted_posts = sorted(posts, key=lambda x: unique_recommendations.index(x['id']))
+        # ใช้ final_recommendations เพื่อรักษาลำดับที่แนะนำ
+        sorted_posts = sorted(posts, key=lambda x: final_recommendations.index(x['id']))
 
         output = []
         for post in sorted_posts:
@@ -491,6 +489,7 @@ def recommend():
     except Exception as e:
         print("Error in recommend function:", e)
         return jsonify({"error": "Internal Server Error"}), 500
+
 
 if __name__ == '__main__':
         app.run(host='0.0.0.0', port=5005)

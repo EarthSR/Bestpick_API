@@ -90,7 +90,7 @@ def create_content_based_model(data, text_column='Content', comment_column='Comm
     tfidf_matrix = tfidf.fit_transform(train_data[text_column].fillna(''))
 
     # ใช้ KNN เพื่อหาความคล้ายคลึงระหว่างโพสต์
-    knn = NearestNeighbors(n_neighbors=10, metric='cosine')
+    knn = NearestNeighbors(n_neighbors=20, metric='cosine')
     knn.fit(tfidf_matrix)
 
     # วิเคราะห์ความรู้สึกจากความคิดเห็นใน train และ test sets
@@ -165,7 +165,7 @@ def recommend_hybrid(user_id, train_data, test_data, collaborative_model, knn, c
                 tfidf_vector = tfidf.transform([train_data.iloc[idx]['Content']])
                 
                 # ใช้ KNN เพื่อหาความคล้ายคลึงของโพสต์
-                n_neighbors = min(20, knn._fit_X.shape[0])
+                n_neighbors = min(50, knn._fit_X.shape[0])
                 distances, indices = knn.kneighbors(tfidf_vector, n_neighbors=n_neighbors)
                 
                 # คำนวณคะแนนจากโพสต์ที่คล้ายกัน
