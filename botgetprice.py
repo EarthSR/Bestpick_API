@@ -328,13 +328,13 @@ def create_collaborative_model(data, n_factors=150, n_epochs=70, lr_all=0.005, r
     return model, test_data
 
 def recommend_hybrid(user_id, train_data, test_data, collaborative_model, knn, tfidf, alpha=0.50):
-    """แนะนำโพสต์โดยใช้ Hybrid Filtering รวม Collaborative และ Content-Based โดยไม่กรองตามหมวดหมู่"""
+    """แนะนำโพสต์โดยใช้ Hybrid Filtering รวม Collaborative และ Content-Based"""
     if not (0 <= alpha <= 1):
         raise ValueError("Alpha ต้องอยู่ในช่วง 0 ถึง 1")
 
     recommendations = []
 
-    # ใช้ test_data ทั้งหมดโดยไม่กรองหมวดหมู่
+    # ใช้ test_data ทั้งหมด
     for _, post in test_data.iterrows():
         # Collaborative Filtering
         collab_score = collaborative_model.predict(user_id, post['post_id']).est
@@ -358,7 +358,6 @@ def recommend_hybrid(user_id, train_data, test_data, collaborative_model, knn, t
     recommendations_df['normalized_score'] = normalize_scores(recommendations_df['score'])
     return recommendations_df.sort_values(by='normalized_score', ascending=False)['post_id'].tolist()
 
-
 def split_and_rank_recommendations(recommendations, user_interactions):
     """แยกโพสต์ที่ผู้ใช้เคยโต้ตอบออกจากโพสต์ที่ยังไม่เคยดู และเรียงลำดับใหม่"""
     # แปลง recommendations ให้ไม่มีโพสต์ซ้ำ
@@ -378,16 +377,11 @@ def split_and_rank_recommendations(recommendations, user_interactions):
 
     return final_recommendations
 
-
 @app.route('/ai/recommend', methods=['POST'])
 @verify_token
 def recommend():
     try:
         user_id = request.user_id
-
-        # *** ลบระบบแคชออกชั่วคราว ***
-        # if user_id in user_recommendations_cache:
-        #     return jsonify(user_recommendations_cache[user_id])
 
         # โหลดข้อมูลจากฐานข้อมูล
         content_based_data, collaborative_data = load_data_from_db()
@@ -405,17 +399,10 @@ def recommend():
             print(f"Error loading models: {e}")
             return jsonify({"error": "Model files not found"}), 500
 
-        categories = [
-            'Gadget', 'Smartphone', 'Laptop', 'Smartwatch', 'Headphone', 'Tablet', 'Camera', 'Drone',
-            'Home_Appliance', 'Gaming_Console', 'Wearable_Device', 'Fitness_Tracker', 'VR_Headset',
-            'Smart_Home', 'Power_Bank', 'Bluetooth_Speaker', 'Action_Camera', 'E_Reader',
-            'Desktop_Computer', 'Projector'
-        ]
-
-        # คำนวณคำแนะนำใหม่ (รวมโพสต์ทั้งหมด)
+        # คำนวณคำแนะนำใหม่
         recommendations = recommend_hybrid(
             user_id, content_based_data, collaborative_data,
-            collaborative_model, knn, categories, tfidf, alpha=0.9
+            collaborative_model, knn, tfidf, alpha=0.9
         )
 
         if not recommendations:
@@ -457,9 +444,6 @@ def recommend():
                 "is_liked": post['is_liked'] > 0
             })
 
-        # *** ไม่เก็บผลลัพธ์ในแคช ***
-        # user_recommendations_cache[user_id] = output
-
         return jsonify(output)
 
     except KeyError as e:
@@ -468,7 +452,6 @@ def recommend():
     except Exception as e:
         print("Error in recommend function:", e)
         return jsonify({"error": "Internal Server Error"}), 500
-
 
 if __name__ == '__main__':
         app.run(host='0.0.0.0', port=5005)
