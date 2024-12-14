@@ -374,31 +374,23 @@ def recommend_hybrid(user_id, train_data, test_data, collaborative_model, knn, c
 
 def split_and_rank_recommendations(recommendations, user_interactions):
     """แยกโพสต์ที่ผู้ใช้เคยโต้ตอบออกจากโพสต์ที่ยังไม่เคยดู และเรียงลำดับใหม่"""
+    # แปลง recommendations ให้ไม่มีโพสต์ซ้ำ
+    unique_recommendations = list(dict.fromkeys(recommendations))
+
     # แยกโพสต์ที่ผู้ใช้ยังไม่เคยดู และโพสต์ที่ผู้ใช้เคยโต้ตอบแล้ว
-    unviewed_posts = [post_id for post_id in recommendations if post_id not in user_interactions]
-    viewed_posts = [post_id for post_id in recommendations if post_id in user_interactions]
+    unviewed_posts = [post_id for post_id in unique_recommendations if post_id not in user_interactions]
+    viewed_posts = [post_id for post_id in unique_recommendations if post_id in user_interactions]
 
     # รวมโพสต์ที่ยังไม่เคยดู (unviewed) ก่อน ตามด้วยโพสต์ที่เคยดูแล้ว (viewed)
     final_recommendations = unviewed_posts + viewed_posts
+
+    # พิมพ์ข้อมูลออกมา
+    print("Unviewed Posts:", unviewed_posts)
+    print("Viewed Posts:", viewed_posts)
+    print("Final Recommendations (ordered):", final_recommendations)
+
     return final_recommendations
 
-# เพิ่มตัวแปรในหน่วยความจำเพื่อเก็บโพสต์แนะนำที่สร้างล่าสุด
-user_recommendations_cache = {}
-
-# ฟังก์ชันสำหรับล้าง cache ทุกๆ 1 วินาที
-def clear_cache_periodically(interval=60):
-    def clear_cache():
-        global user_recommendations_cache
-        print("Clearing user recommendations cache...")
-        user_recommendations_cache = {}
-
-    while True:
-        time.sleep(interval)
-        clear_cache()
-
-# เริ่ม Thread สำหรับล้าง cache ทุกๆ 1 นาที
-cache_clear_thread = threading.Thread(target=clear_cache_periodically, args=(60,), daemon=True)
-cache_clear_thread.start()
 
 @app.route('/ai/recommend', methods=['POST'])
 @verify_token
@@ -406,9 +398,9 @@ def recommend():
     try:
         user_id = request.user_id
 
-        # หากมี Cache อยู่แล้ว ให้ใช้ Cache เดิม
-        if user_id in user_recommendations_cache:
-            return jsonify(user_recommendations_cache[user_id])
+        # *** ลบระบบแคชออกชั่วคราว ***
+        # if user_id in user_recommendations_cache:
+        #     return jsonify(user_recommendations_cache[user_id])
 
         # โหลดข้อมูลจากฐานข้อมูล
         content_based_data, collaborative_data = load_data_from_db()
@@ -478,8 +470,8 @@ def recommend():
                 "is_liked": post['is_liked'] > 0
             })
 
-        # เก็บผลลัพธ์ใหม่ลง Cache
-        user_recommendations_cache[user_id] = output
+        # *** ไม่เก็บผลลัพธ์ในแคช ***
+        # user_recommendations_cache[user_id] = output
 
         return jsonify(output)
 
