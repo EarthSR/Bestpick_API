@@ -181,7 +181,7 @@ def search_product():
     return jsonify(results)
 
 # Configure your database URI
-app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+mysqlconnector://root:1234@localhost/reviewapp'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+mysqlconnector://bestpick_user:bestpick7890@localhost/reviewapp'
 
 # Initialize the SQLAlchemy object
 db = SQLAlchemy(app)
@@ -215,7 +215,7 @@ def verify_token(f):
 def load_data_from_db():
     """โหลดข้อมูลจากฐานข้อมูล MySQL และส่งคืนเป็น DataFrame"""
     try:
-        engine = create_engine('mysql+mysqlconnector://root:1234@localhost/reviewapp')
+        engine = create_engine('mysql+mysqlconnector://bestpick_user:bestpick7890@localhost/reviewapp')
         
         query_content = "SELECT * FROM contentbasedview;"
         content_based_data = pd.read_sql(query_content, con=engine)
